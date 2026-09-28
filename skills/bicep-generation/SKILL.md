@@ -91,241 +91,22 @@ Recommended additional decorators when the contract needs them:
 - `@secure()` for secrets or protected values
 - `@minValue()` / `@maxValue()` for numeric capacity settings
 
-### 4. Naming convention rules
 
-Use deterministic names derived from parameters or variables, not ad hoc literals.
+### 4. Naming, outputs, and anti-patterns
 
-| Resource type | Pattern | Example |
-|---|---|---|
-| Resource group | `rg-{workload}-{env}-{region}` | `rg-orders-dev-aue` |
-| Function App | `func-{workload}-{env}` | `func-orders-dev` |
-| App Service plan / Functions plan | `plan-{workload}-{env}` | `plan-orders-dev` |
-| Storage account | `st{workload}{env}{region}{suffix}` | `stordersdevaue01` |
-| Service Bus namespace | `sb-{workload}-{env}` | `sb-orders-dev` |
-| Cosmos DB account | `cosmos-{workload}-{env}` | `cosmos-orders-dev` |
-| PostgreSQL server | `psql-{workload}-{env}` | `psql-orders-dev` |
-| Key Vault | `kv-{workload}-{env}` | `kv-orders-dev` |
-| Log Analytics workspace | `log-{workload}-{env}` | `log-orders-dev` |
-| Application Insights | `appi-{workload}-{env}` | `appi-orders-dev` |
+- **Naming conventions:** derive every resource name deterministically from `workload`/`environment`/`region` parameters — see [references/naming-conventions.md](references/naming-conventions.md) for the pattern table.
+- **Required outputs:** every module must output `resourceId` (string), `name` (string), and `principalId` (string, empty if the module has no identity). Add `hostname`, `endpoint`, `privateEndpointId`, or `connectionSettingName` when relevant.
+- **Anti-patterns:** see [references/anti-patterns.md](references/anti-patterns.md) for the full reject list (hardcoded IDs/secrets, old API versions, missing `scope: rg`, etc.).
 
-Naming rules:
+### 5. Subscription-scope main.bicep pattern (Mandatory)
 
-- Compute names once in variables or parameters.
-- Keep storage account names lowercase and globally unique.
-- Avoid inline interpolation inside resource `name:` properties; assign the final string to a variable first.
-- Reuse the same workload, environment, and region tokens everywhere for reviewability.
+When main.bicep creates a resource group (the standard pattern for this migration factory), it **MUST** be subscription-scoped — see [references/subscription-scope-pattern.md](references/subscription-scope-pattern.md) for the required `main.bicep` structure, parameter file entries, and correct vs. forbidden deployment commands.
 
-### 5. Required outputs for every module
+### 6. Example module skeleton
 
-Every module must expose these outputs so downstream templates and workflows can compose safely.
+See [references/module-skeleton-example.md](references/module-skeleton-example.md) for a complete child-module example (not `main.bicep`) showing the header block, decorators, naming, and required outputs applied together.
 
-| Output | Type | Required behavior |
-|---|---|---|
-| `resourceId` | `string` | Always output the ARM resource ID of the primary resource |
-| `name` | `string` | Always output the deployable resource name |
-| `principalId` | `string` | Output the managed identity principal ID, or an empty string if the module has no identity |
-
-Recommended optional outputs when relevant:
-
-- `hostname`
-- `endpoint`
-- `privateEndpointId`
-- `connectionSettingName`
-
-### 6. Anti-patterns to reject
-
-Do not accept any of the following:
-
-- Hardcoded subscription IDs, tenant IDs, secrets, or passwords
-- Inline string interpolation directly in resource `name:` properties
-- API versions older than 2023
-- One giant module that mixes networking, security, compute, and data responsibilities
-- Public network access enabled on sensitive data services without an explicit design exception
-- Output omission for `resourceId`, `name`, or `principalId`
-- Environment-specific literals embedded in module code when they belong in parameter files
-- **`targetScope = 'resourceGroup'` in main.bicep when the template creates its own resource group** — this makes `az deployment group create` fail because the resource group does not yet exist
-- **`az deployment group create` against a subscription-scoped template** — always use `az deployment sub create`
-- **Module calls in main.bicep without `scope: rg`** — every module call must be scoped to the resource group resource
-- **`resourceGroup().location` inside a subscription-scoped template** — the `resourceGroup()` function is unavailable at subscription scope; use the `location` parameter instead
-
-### 7. Subscription-scope main.bicep pattern (Mandatory)
-
-When main.bicep creates a resource group (which is the standard pattern for this migration factory), the template **MUST** be subscription-scoped. This is a hard rule — not optional.
-
-#### Why this matters
-
-A `targetScope = 'resourceGroup'` template cannot create its own resource group because the resource group must already exist before `az deployment group create` runs. Attempting to do so produces a 404 or "resource group not found" error mid-deployment.
-
-#### Required structure for main.bicep
-
-```bicep
-/*
-  Module: main.bicep
-  Purpose: Subscription-scope orchestration — creates resource group and delegates to modules.
-  Source: outputs/azure-architecture-output/design-document.md Section 5
-  Inputs: environment, location, resourceGroupName, workload, tags
-  Outputs: (none — consumed by caller/CI)
-  Notes: targetScope MUST be 'subscription'. Every module call MUST carry scope: rg.
-*/
-
-targetScope = 'subscription'
-
-@description('Deployment environment.')
-@allowed(['dev', 'staging', 'prod'])
-param environment string
-
-@description('Azure region for all resources.')
-param location string = 'australiaeast'
-
-@description('Resource group name.')
-param resourceGroupName string = 'rg-${workload}-${environment}'
-
-@description('Short workload identifier.')
-param workload string
-
-@description('Tags applied to every resource.')
-param tags object = {
-  Environment: environment
-  Application: workload
-}
-
-resource rg 'Microsoft.Resources/resourceGroups@2023-07-01' = {
-  name: resourceGroupName
-  location: location
-  tags: tags
-}
-
-module storageModule 'modules/storage.bicep' = {
-  name: 'deploy-storage'
-  scope: rg          // ← mandatory on EVERY module call
-  params: {
-    workload: workload
-    environment: environment
-    location: location
-    tags: tags
-  }
-}
-
-module functionModule 'modules/function-app.bicep' = {
-  name: 'deploy-function'
-  scope: rg          // ← mandatory on EVERY module call
-  params: {
-    workload: workload
-    environment: environment
-    tags: tags
-  }
-}
-```
-
-#### Required parameter file entries
-
-Every `.bicepparam` file must include `location` and `resourceGroupName`:
-
-```bicep
-using '../main.bicep'
-
-param environment = 'dev'
-param location = 'australiaeast'
-param resourceGroupName = 'rg-migration-dev'
-param workload = 'migration'
-```
-
-#### Correct deployment commands
-
-```bash
-# Deploy (subscription scope)
-az deployment sub create \
-  --location australiaeast \
-  --template-file outputs/bicep-templates/main.bicep \
-  --parameters @outputs/bicep-templates/parameters/dev.bicepparam
-
-# What-if preview (subscription scope)
-az deployment sub what-if \
-  --location australiaeast \
-  --template-file outputs/bicep-templates/main.bicep \
-  --parameters @outputs/bicep-templates/parameters/dev.bicepparam
-```
-
-#### FORBIDDEN commands for subscription-scoped templates
-
-```bash
-# ❌ WRONG — cannot create resource groups at group scope
-az deployment group create --resource-group rg-migration-dev --template-file main.bicep ...
-
-# ❌ WRONG — same problem
-az deployment group what-if --resource-group rg-migration-dev --template-file main.bicep ...
-```
-
-### 8. Example Bicep module skeleton (module files — not main.bicep)
-
-```bicep
-/*
-  Module: modules/function-app.bicep
-  Purpose: Deploy the Azure Function App and its managed identity.
-  Source: outputs/azure-architecture-output/design-document.md Section 5
-  Inputs: workload, environment, location, tags, storageAccountName, appInsightsConnectionString
-  Outputs: resourceId, name, principalId
-  Notes: No hardcoded secrets, no inline resource-name interpolation, API versions 2023 or newer
-*/
-
-targetScope = 'resourceGroup'
-
-@description('Short workload identifier used in resource naming.')
-@minLength(2)
-param workload string
-
-@description('Deployment environment.')
-@allowed([
-  'dev'
-  'staging'
-  'prod'
-])
-param environment string
-
-@description('Azure location for the resource group deployment.')
-param location string = resourceGroup().location
-
-@description('Tags applied to the Function App resources.')
-param tags object
-
-@description('Existing storage account name used by the Function App.')
-@minLength(3)
-param storageAccountName string
-
-@description('Application Insights connection string.')
-@secure()
-param appInsightsConnectionString string
-
-var functionAppName = 'func-${workload}-${environment}'
-var siteConfigAppSettings = [
-  {
-    name: 'APPINSIGHTS_CONNECTION_STRING'
-    value: appInsightsConnectionString
-  }
-]
-
-resource functionApp 'Microsoft.Web/sites@2023-12-01' = {
-  name: functionAppName
-  location: location
-  kind: 'functionapp,linux'
-  identity: {
-    type: 'SystemAssigned'
-  }
-  tags: tags
-  properties: {
-    httpsOnly: true
-    siteConfig: {
-      appSettings: siteConfigAppSettings
-    }
-  }
-}
-
-output resourceId string = functionApp.id
-output name string = functionApp.name
-output principalId string = functionApp.identity.principalId ?? ''
-```
-
-### 9. Validation workflow
+### 7. Validation workflow
 
 1. Ensure every module file has the required header block.
 2. Ensure every parameter has `@description`.
@@ -345,7 +126,7 @@ az deployment sub what-if \
   --parameters @outputs/bicep-templates/parameters/dev.bicepparam
 ```
 
-### 9. Edge Cases / Failure Modes
+### 8. Edge Cases / Failure Modes
 
 - **No managed identity on a resource:** still output `principalId` as an empty string to keep the module contract stable.
 - **Global naming collision:** introduce a suffix variable or parameter rather than changing the naming scheme ad hoc.

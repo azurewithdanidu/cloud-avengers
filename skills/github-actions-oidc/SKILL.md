@@ -14,289 +14,28 @@ Set up Azure Workload Identity Federation and produce production-ready GitHub Ac
 
 Before writing any GitHub Actions workflow that deploys to Azure.
 
+**When NOT to use:**
+- Do not run `scripts/setup-oidc.*` without explicit approval from someone holding Azure AD
+  Application Administrator and RBAC assignment permissions — it creates an app registration,
+  service principal, federated credential, and resource-group role assignments. This is a
+  one-time, privileged, human-approved bootstrap step, not an unattended part of pipeline generation.
+- Do not use this skill to grant `Owner` or subscription-scoped roles — see Rules below.
+
 ---
 
-## OIDC Authentication Setup (One-Time Per Environment)
 
-Document these steps in `outputs/pipeline/setup-oidc.md` for a human with Azure AD permissions to execute:
+## Reference Files
 
-```bash
-# 1. Create app registration
-APP_ID=$(az ad app create --display-name "gh-<repo>-<env>" --query appId -o tsv)
+Load only the file relevant to the current task — do not load all of them:
 
-# 2. Create service principal
-SP_ID=$(az ad sp create --id $APP_ID --query id -o tsv)
-
-# 3. Assign Contributor on the resource group (for app deploys)
-az role assignment create \
-  --assignee $SP_ID \
-  --role "Contributor" \
-  --scope /subscriptions/<subscription-id>/resourceGroups/rg-<env>-migration
-
-# 4. Assign User Access Administrator on RG (needed if Bicep creates role assignments)
-az role assignment create \
-  --assignee $SP_ID \
-  --role "User Access Administrator" \
-  --scope /subscriptions/<subscription-id>/resourceGroups/rg-<env>-migration
-
-# 5. Create federated credential (repeat for each branch/environment)
-az ad app federated-credential create --id $APP_ID --parameters - <<EOF
-{
-  "name": "gh-actions-<env>",
-  "issuer": "https://token.actions.githubusercontent.com",
-  "subject": "repo:<org>/<repo>:environment:<env>",
-  "audiences": ["api://AzureADTokenExchange"]
-}
-EOF
-
-# 6. Note these values for GitHub Secrets:
-echo "AZURE_CLIENT_ID = $APP_ID"
-echo "AZURE_TENANT_ID = $(az account show --query tenantId -o tsv)"
-echo "AZURE_SUBSCRIPTION_ID = $(az account show --query id -o tsv)"
-```
-
-### Subject Filter Patterns
-
-| Trigger | Subject string |
+| File | Load when |
 |---|---|
-| Push to branch `main` | `repo:<org>/<repo>:ref:refs/heads/main` |
-| GitHub Environment `prod` | `repo:<org>/<repo>:environment:prod` |
-| Pull Request | `repo:<org>/<repo>:pull_request` |
-
-### Required GitHub Secrets
-
-Add these to GitHub Settings → Secrets and Variables → Actions:
-
-| Secret | Scope | Value |
-|---|---|---|
-| `AZURE_CLIENT_ID` | Repo | App Registration client ID |
-| `AZURE_TENANT_ID` | Repo | Azure AD tenant ID |
-| `AZURE_SUBSCRIPTION_ID` | Repo | Target subscription ID |
-| `STATIC_WEB_APP_TOKEN` | Repo or Environment | SWA deployment token from Bicep output |
-
-### Workflow Permissions Block (Always Include)
-
-```yaml
-permissions:
-  id-token: write   # Required for OIDC token request
-  contents: read
-```
-
-### Login Step
-
-```yaml
-- name: Azure Login (OIDC)
-  uses: azure/login@v2
-  with:
-    client-id: ${{ secrets.AZURE_CLIENT_ID }}
-    tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-    subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-```
-
----
-
-## Workflow Structure Patterns
-
-### File Naming Convention
-
-```
-.github/workflows/
-  deploy-infra.yml         # Bicep IaC
-  deploy-functions.yml     # Azure Functions
-  deploy-staticweb.yml     # Static Web Apps
-  deploy-containers.yml    # Container Apps / AKS (if applicable)
-  validate-pr.yml          # PR validation (lint + what-if, no deploy)
-```
-
-### Multi-Environment Trigger Pattern
-
-```yaml
-on:
-  push:
-    branches:
-      - main        # → deploy to staging
-    paths:
-      - 'outputs/azure-functions/**'
-      - '.github/workflows/deploy-functions.yml'
-  pull_request:
-    branches: [main]   # → validate only (no deploy)
-  workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Target environment'
-        required: true
-        type: choice
-        options: [dev, staging, prod]
-```
-
-### Concurrency Control (Prevents Overlapping Deploys)
-
-```yaml
-concurrency:
-  group: deploy-${{ github.ref }}-${{ inputs.environment || 'auto' }}
-  cancel-in-progress: false   # Do NOT cancel in-progress deploys — let them finish
-```
-
-### Resource Tagging on Every Deploy
-
-```yaml
-- name: Tag deployment
-  run: |
-    az tag create \
-      --resource-id "/subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ vars.RESOURCE_GROUP_NAME }}" \
-      --tags environment=${{ vars.ENV }} deployedBy=github-actions repo=${{ github.repository }} runId=${{ github.run_id }}
-```
-
----
-
-## Azure Static Web Apps Deployment
-
-```yaml
-jobs:
-  deploy-static-web:
-    runs-on: ubuntu-latest
-    environment: ${{ vars.ENV }}
-    permissions:
-      id-token: write
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-
-      # SWA requires index.html as default document — verify before deploy
-      - name: Verify index.html exists
-        run: |
-          if [ ! -f "source-app/app-code/build/index.html" ]; then
-            echo "ERROR: index.html not found. SWA requires index.html as the default document."
-            exit 1
-          fi
-
-      - name: Deploy to Azure Static Web Apps
-        uses: Azure/static-web-apps-deploy@v1
-        with:
-          azure_static_web_apps_api_token: ${{ secrets.STATIC_WEB_APP_TOKEN }}
-          action: upload
-          app_location: source-app/app-code/build   # Folder containing index.html
-          skip_app_build: true                        # Pre-built; do not re-build
-```
-
-**Critical SWA rules:**
-- `index.html` MUST exist as the default document — `app.html` alone is rejected
-- Use `skip_app_build: true` for pre-built apps
-- The SWA deployment token comes from the Bicep `outputs.staticWebAppDeploymentToken`; store in `STATIC_WEB_APP_TOKEN` GitHub Secret
-- Wrong args to avoid: `--skipBuild`, `--branch`, `--deploymentToken` (use `--apiToken`)
-
----
-
-## Rollback Strategy
-
-### Azure Functions — Slot Swap Rollback
-
-```yaml
-- name: Rollback Function App
-  if: failure()
-  run: |
-    az functionapp deployment slot swap \
-      --resource-group ${{ vars.RESOURCE_GROUP_NAME }} \
-      --name ${{ vars.FUNCTION_APP_NAME }} \
-      --slot staging \
-      --target-slot production
-    echo "Rollback complete — production reverted to previous deployment"
-```
-
-### Bicep — Redeploy Previous Template
-
-```yaml
-- name: Rollback IaC to previous commit
-  if: failure()
-  run: |
-    PREV_SHA=$(git rev-parse HEAD~1)
-    git show $PREV_SHA:outputs/bicep-templates/main.bicep > /tmp/main-prev.bicep
-    az deployment group create \
-      --resource-group ${{ vars.RESOURCE_GROUP_NAME }} \
-      --template-file /tmp/main-prev.bicep \
-      --parameters outputs/bicep-templates/parameters/${{ vars.ENV }}.bicepparam \
-      --name "rollback-${{ github.run_id }}"
-```
-
-General rollback rules:
-- Every deployment job must have an `if: failure()` rollback step
-- Tag the rollback deployment: `--name "rollback-${{ github.run_id }}"`
-- Never use `--no-wait` on deployment commands — wait for completion to detect failures
-
----
-
-## Quality Gates — PR Validation Workflow
-
-```yaml
-# .github/workflows/validate-pr.yml
-on:
-  pull_request:
-    branches: [main]
-
-jobs:
-  lint-and-validate:
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Azure Login (OIDC)
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Lint Bicep
-        run: az bicep build --file outputs/bicep-templates/main.bicep
-
-      - name: Bicep What-If (PR comment)
-        run: |
-          az deployment group what-if \
-            --resource-group ${{ vars.RESOURCE_GROUP_NAME }} \
-            --template-file outputs/bicep-templates/main.bicep \
-            --parameters outputs/bicep-templates/parameters/dev.bicepparam \
-            2>&1 | tee what-if-output.txt
-
-      - name: Post What-If to PR
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const output = fs.readFileSync('what-if-output.txt', 'utf8');
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: '## Bicep What-If\n```\n' + output.slice(0, 60000) + '\n```'
-            });
-```
-
----
-
-## Action Version Pinning
-
-Always pin action versions to a specific tag or SHA for production workflows:
-
-```yaml
-# Pinned versions — update deliberately, not automatically
-uses: actions/checkout@v4
-uses: actions/setup-python@v5
-uses: azure/login@v2
-uses: Azure/functions-action@v1
-uses: Azure/static-web-apps-deploy@v1
-uses: actions/github-script@v7
-uses: actions/upload-artifact@v4
-```
-
-For highest security, pin to full commit SHA:
-```yaml
-uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-uses: azure/login@6c251865b4e6290e7b78be643ea2d005bc51f69a       # v2.1.1
-```
+| [references/oidc-setup.md](references/oidc-setup.md) | Bootstrapping OIDC for a new environment: app registration, federated credential, required GitHub secrets, login step |
+| [references/workflow-structure-patterns.md](references/workflow-structure-patterns.md) | Naming new workflow files, setting up multi-environment triggers, concurrency control, or deployment tagging |
+| [references/static-web-apps-deployment.md](references/static-web-apps-deployment.md) | Writing a Static Web Apps deployment job |
+| [references/rollback-strategy.md](references/rollback-strategy.md) | Adding a rollback step to a deployment job (Functions slot swap or Bicep redeploy) |
+| [references/pr-validation-workflow.md](references/pr-validation-workflow.md) | Writing the PR validation workflow (lint + what-if, no deploy) |
+| [references/action-version-pinning.md](references/action-version-pinning.md) | Checking or updating `uses:` version pins in any workflow |
 
 ---
 
@@ -327,6 +66,10 @@ uses: azure/login@6c251865b4e6290e7b78be643ea2d005bc51f69a       # v2.1.1
 | `scripts/setup-oidc.ps1` | Creates App Registration, Service Principal, federated credential, and RBAC assignments |
 | `scripts/setup-oidc.sh` | Bash equivalent of the above |
 
+**Approval gate:** this script performs multiple privileged, mutating operations (`az ad app
+create`, `az ad sp create`, `az role assignment create`, `az ad app federated-credential create`).
+Document the intended command in `outputs/pipeline/setup-oidc.md` first and get explicit user
+confirmation of the org, repo, environment, subscription, and resource group before running it.
 Run once per environment before creating GitHub workflows:
 
 ```powershell
