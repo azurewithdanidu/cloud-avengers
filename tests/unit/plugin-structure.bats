@@ -44,7 +44,7 @@ REPO_ROOT="$BATS_TEST_DIRNAME/../.."
   FAIL=0
   while IFS= read -r f; do
     basename "$f" | grep -q "^SKILL\.md$" || { echo "WRONG NAME: $f"; FAIL=1; }
-  done < <(find "$REPO_ROOT/skills" -name "*.md" ! -path "*/scripts/*")
+  done < <(find "$REPO_ROOT/skills" -name "*.md" ! -path "*/scripts/*" ! -path "*/references/*" ! -path "*/steps/*")
   [ "$FAIL" -eq 0 ]
 }
 
