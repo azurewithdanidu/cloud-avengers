@@ -2,32 +2,36 @@
 
 Requires: the subscription-scope gate at the top of `../SKILL.md` has been checked first.
 
+Run every check below **for each `main.<group>.bicep` file** in deployment order (networking → security → data → monitoring → messaging → compute) — there is no single template to validate.
+
 ## 1. Bicep Syntax Validation
 
 ```bash
-# Bicep syntax check — must exit 0
-az bicep build --file outputs/bicep-templates/main.bicep
+# Bicep syntax check — must exit 0, repeat for every group file
+for f in outputs/bicep-templates/main.*.bicep; do
+  az bicep build --file "$f"
+done
 
-# ARM validation — subscription-scoped (main.bicep creates its own resource group)
+# ARM validation — subscription-scoped (each group file creates the resource group idempotently)
 az deployment sub validate \
   --location australiaeast \
-  --template-file outputs/bicep-templates/main.bicep \
-  --parameters outputs/bicep-templates/parameters/prod.bicepparam
+  --template-file outputs/bicep-templates/main.data.bicep \
+  --parameters outputs/bicep-templates/parameters/prod/data.bicepparam
 # Expected: validationState: "Valid"
 ```
 
-**Gate:** Deployment MUST NOT proceed if `az bicep build` exits non-zero or if `validate` returns errors.
+**Gate:** Deployment MUST NOT proceed if `az bicep build` exits non-zero for any group file, or if `validate` returns errors for any group file.
 
 ## 2. What-If Dry Run
 
-For each environment (dev, staging, prod), run:
+For each environment (dev, staging, prod) **and each group**, run:
 
 ```bash
 az deployment sub what-if \
   --location australiaeast \
-  --template-file outputs/bicep-templates/main.bicep \
-  --parameters outputs/bicep-templates/parameters/<env>.bicepparam \
-  --output json > /tmp/whatif-<env>.json
+  --template-file outputs/bicep-templates/main.<group>.bicep \
+  --parameters outputs/bicep-templates/parameters/<env>/<group>.bicepparam \
+  --output json > /tmp/whatif-<group>-<env>.json
 ```
 
 Parse the output for **blocking conditions** — stop and alert the user if any are found:
@@ -40,6 +44,7 @@ Parse for **warning conditions** — log and continue:
 - New resources being created (expected)
 - Tag changes (expected)
 - SKU upgrades (log for cost awareness)
+- A downstream group's `existing` lookup resolving against a resource that hasn't deployed yet (fix deployment order, don't ignore)
 
 ## 3. Policy Compliance Check
 
@@ -71,4 +76,5 @@ Quota checklist:
 - [ ] Container App environment quota available (if using Container Apps)
 - [ ] Database SKU available in target region
 
-Next (after a successful deploy): [Step 2 — Post-Deployment Checklist](02-post-deployment-checklist.md).
+Next (after every group deploys successfully, in order): [Step 2 — Post-Deployment Checklist](02-post-deployment-checklist.md).
+

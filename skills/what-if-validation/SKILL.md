@@ -18,14 +18,13 @@ Before any Bicep deployment and after deployment to validate the deployed state.
 
 ## ⚠️ Subscription-scope Mandatory Gate
 
-**If `main.bicep` declares `targetScope = 'subscription'`, ALL az deployment commands MUST use `sub create` / `sub what-if`. Using `group create` or `group what-if` on a subscription-scoped template will fail because the resource group does not yet exist at deployment time. This is a hard gate — block deployment if the wrong command is used.**
+**Every `main.<group>.bicep` file (`main.networking.bicep`, `main.security.bicep`, `main.data.bicep`, `main.monitoring.bicep`, `main.messaging.bicep`, `main.compute.bicep`, or whatever groups the workload uses — see `module-organization` skill) declares `targetScope = 'subscription'`. ALL az deployment commands for ALL group files MUST use `sub create` / `sub what-if`. Using `group create` or `group what-if` will fail because the resource group does not yet exist at deployment time. This is a hard gate — block deployment if the wrong command is used, for any group file.**
 
 | Template scope | Correct deploy command | Correct what-if command | FORBIDDEN |
 |---|---|---|---|
-| `subscription` | `az deployment sub create --location <region>` | `az deployment sub what-if --location <region>` | `az deployment group create/what-if` |
-| `resourceGroup` | `az deployment group create --resource-group <rg>` | `az deployment group what-if --resource-group <rg>` | `az deployment sub create/what-if` |
+| `subscription` (every `main.<group>.bicep`) | `az deployment sub create --location <region>` | `az deployment sub what-if --location <region>` | `az deployment group create/what-if` |
 
-**Detection rule:** Read the first 10 lines of `outputs/bicep-templates/main.bicep`. If `targetScope = 'subscription'` is present, enforce sub-scope commands everywhere. Reject any CI/CD step, script, or agent prompt that uses `group create` or `group validate` against this template.
+**Detection rule:** Read the first 10 lines of every `outputs/bicep-templates/main.*.bicep` file. Every one of them must declare `targetScope = 'subscription'`. Reject any CI/CD step, script, or agent prompt that uses `group create` or `group validate` against any of them.
 
 ---
 
@@ -48,10 +47,10 @@ Each step file states its prerequisite and links to the next. Write the final re
 ## Rules
 
 - **Never proceed past a blocking what-if condition** without explicit user confirmation.
-- **Always run what-if for all three environments** before declaring validation complete.
-- **If `main.bicep` is subscription-scoped, always use `az deployment sub what-if` and `az deployment sub create`.** Using `group` variants against a subscription-scoped template is a hard failure — block deployment immediately.
+- **Always run what-if for every group file in all three environments** before declaring validation complete — there is no single template to validate.
+- **Every `main.<group>.bicep` is subscription-scoped — always use `az deployment sub what-if` and `az deployment sub create`.** Using `group` variants is a hard failure — block deployment immediately.
 - **Never mark a check `[x] PASS`** unless the underlying validation actually succeeded.
-- **Always save what-if JSON output** to `/tmp/whatif-<env>.json` for inspection.
+- **Always save what-if JSON output** to `/tmp/whatif-<group>-<env>.json` for inspection.
 - **The detailed report goes to `outputs/validation-report.md`** — the task plan summary is separate.
 
 ## Output
@@ -65,16 +64,16 @@ Each step file states its prerequisite and links to the next. Write the final re
 
 | Script | Purpose |
 |---|---|
-| `scripts/run-what-if.ps1` | Full pre-deployment validation gate: syntax → ARM validate → what-if → policy → quota |
+| `scripts/run-what-if.ps1` | Full pre-deployment validation gate for every group file: syntax → ARM validate → what-if → policy → quota |
 
 Run before every environment deployment:
 
 ```powershell
 ./scripts/run-what-if.ps1 \
-    -ResourceGroup "rg-dev-migration" -Environment dev
+    -Environment dev -Location australiaeast
 ```
 
-The script blocks on destructive what-if changes (deletes of data resources, `publicNetworkAccess` re-enabled).  It writes `outputs/deployment-validation/what-if-<env>.json` and `what-if-report.md`.
+The script blocks on destructive what-if changes (deletes of data resources, `publicNetworkAccess` re-enabled) for **each** `main.<group>.bicep`. It writes `outputs/deployment-validation/what-if-<group>-<env>.json` and `what-if-report.md`.
 
 ---
 
@@ -100,7 +99,7 @@ The script blocks on destructive what-if changes (deletes of data resources, `pu
 
 ### Best Practices
 
-- **Always use subscription-scope commands for subscription-scoped templates** — `az deployment sub create/what-if`. For resource-group-scoped module templates use `az deployment group create` with an existing RG. Mixing scopes causes 403 or 404 errors and is a common source of deployment failures.
+- **Always use subscription-scope commands for every group file** — `az deployment sub create/what-if`. Every `main.<group>.bicep` creates its own resource group, so `az deployment group *` is never correct here. Mixing scopes causes 403 or 404 errors and is a common source of deployment failures.
 - **Block on `changeType: Delete` for data resources** — accidental deletion of storage accounts, Key Vaults, or databases is not easily recoverable even with soft-delete enabled.
 - **What-if is not a guarantee:** ARM what-if output can differ from actual deployment results in edge cases (e.g., resource provider bugs, concurrent changes). Always review what-if output before approving.
 - **Policy compliance must be checked pre-deployment:** Deploying a non-compliant resource in `Deny` policy mode causes a 403 error mid-deployment and leaves the stack in a partial state.

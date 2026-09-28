@@ -142,9 +142,8 @@ Last Updated: <timestamp>
 
 ### Phase 3a — IaC Transformation
 <!-- Populated from design-document.md Section 5 after Phase 2 -->
-- [ ] Generate main.bicep
-- [ ] Generate Bicep modules (to be detailed after Phase 2)
-- [ ] Generate parameter files (dev / staging / prod)
+- [ ] Generate main.<group>.bicep for each group (networking, security, data, monitoring, messaging, compute — or a justified alternative), calling AVM modules directly (no local module files)
+- [ ] Generate parameter files per group (dev / staging / prod)
 
 ### Phase 3b — Code Refactor
 <!-- Populated from design-document.md Section 6 after Phase 2 -->
@@ -291,16 +290,17 @@ other — all three consume the Phase 2 design document and write to different o
 **Exact prompt to send:**
 ```
 Read Section 5 (Infrastructure as Code Specification) of
-outputs/azure-architecture-output/design-document.md. For each Bicep module described in that
-section, generate the corresponding .bicep file with the exact parameters, resources, and outputs
-specified. Write all output to outputs/bicep-templates/ maintaining the module/parameters folder
-structure. Do not use PowerShell or CLI commands; use MCP servers only.
+outputs/azure-architecture-output/design-document.md. For each resource described in that
+section, assign it to a grouped orchestrator file (main.networking.bicep, main.security.bicep,
+main.data.bicep, main.monitoring.bicep, main.messaging.bicep, main.compute.bicep, or a justified
+alternative group) and call the AVM module directly — no local module files. Write all output to
+outputs/bicep-templates/ maintaining the flat main.<group>.bicep + parameters/<env>/<group>.bicepparam
+folder structure. Do not use PowerShell or CLI commands; use MCP servers only.
 ```
 
 **Artifact completion check:**
-- `outputs/bicep-templates/main.bicep` exists
-- At least one file under `outputs/bicep-templates/modules/`
-- `outputs/bicep-templates/parameters/dev.bicepparam` exists
+- At least one `outputs/bicep-templates/main.*.bicep` group file exists
+- `outputs/bicep-templates/parameters/dev/` contains at least one `.bicepparam` file
 
 ### Phase 3b — Application Code Refactor
 

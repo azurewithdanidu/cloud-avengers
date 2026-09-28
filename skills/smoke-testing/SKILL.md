@@ -16,11 +16,10 @@ After a successful Bicep deployment, before marking Phase 4 complete.
 
 ## Process
 
-1. **Get deployed resource names** from Bicep outputs:
+1. **Get deployed resource names** from Bicep outputs — one call per group (each group file is deployed via `az deployment sub create`, so its outputs are read via `az deployment sub show`):
    ```bash
-   az deployment group show \
+   az deployment sub show \
      --name <deployment-name> \
-     --resource-group rg-<env>-<workload> \
      --query properties.outputs \
      --output json
    ```

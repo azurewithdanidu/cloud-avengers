@@ -12,9 +12,8 @@ A phase is not complete until every listed artifact exists, is non-empty, and me
 | 2 | `outputs/azure-architecture-output/architecture-diagram-azure.mmd` | Contains Mermaid graph syntax plus at least one `subgraph` |
 | 2 | `outputs/azure-architecture-output/cost-comparison.md` | Contains a monthly summary table and break-even section |
 | 2 | `outputs/azure-architecture-output/service-mapping.md` | Contains AWS and Azure mapping columns |
-| 3a | `outputs/bicep-templates/main.bicep` | References modules and builds logically from Section 5 |
-| 3a | `outputs/bicep-templates/modules/*.bicep` | At least one module file exists and is non-empty |
-| 3a | `outputs/bicep-templates/parameters/dev.bicepparam` | References `../main.bicep` or `main.bicep` |
+| 3a | `outputs/bicep-templates/main.*.bicep` | At least one grouped orchestrator file exists (`main.networking.bicep`, `main.security.bicep`, `main.data.bicep`, `main.monitoring.bicep`, `main.messaging.bicep`, `main.compute.bicep`, or a justified alternative group), each declaring `targetScope = 'subscription'` and containing only AVM module calls (`br/public:avm/...`) — no local `modules/*.bicep` files |
+| 3a | `outputs/bicep-templates/parameters/dev/*.bicepparam` | At least one parameter file per deployed group, each referencing its matching `../../main.<group>.bicep` |
 | 3b | `outputs/azure-functions/function_app.py` | Contains Azure Functions app definition |
 | 3b | `outputs/azure-functions/requirements.txt` | Lists `azure-functions` and needed Azure SDK packages |
 | 3b | `outputs/azure-functions/host.json` | Non-empty JSON configuration |

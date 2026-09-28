@@ -107,12 +107,18 @@ After the user replies "done":
 
 ## Step 3 — Pre-Deployment Checks
 
-Before deploying, verify the required output artifacts exist:
+Before deploying, verify the required output artifacts exist. There is no single `main.bicep` — infrastructure is split into grouped, subscription-scoped orchestrator files, deployed one at a time in dependency order:
+
+```
+main.networking.bicep → main.security.bicep → main.data.bicep → main.monitoring.bicep → main.messaging.bicep → main.compute.bicep
+```
+
+(Adjust the group list to whatever `outputs/bicep-templates/main.*.bicep` files actually exist — the workload may use a different group set.)
 
 | Artifact | Expected Path | Required For |
 |---|---|---|
-| Main Bicep template | `outputs/bicep-templates/main.bicep` | IaC deployment |
-| Bicep parameters file | `outputs/bicep-templates/parameters/<env>.bicepparam` | IaC deployment |
+| Grouped Bicep templates | `outputs/bicep-templates/main.*.bicep` (one per group) | IaC deployment |
+| Bicep parameters per group | `outputs/bicep-templates/parameters/<env>/<group>.bicepparam` | IaC deployment |
 | Functions app code | `outputs/azure-functions/` | App deployment |
 | Functions requirements | `outputs/azure-functions/requirements.txt` | App deployment |
 | Static app artifact (preferred) | `outputs/static-web-app/` | Static Web App deployment |
@@ -125,35 +131,50 @@ For Static Web App artifacts:
 - If absent, use `outputs/azure-functions/app.html` and convert it to `index.html` in a temporary deployment folder.
 - If both are absent, stop and report the missing frontend artifact.
 
-Also run a Bicep what-if to preview changes before deploying:
+Also run a Bicep what-if to preview changes before deploying — **once per group file**, in dependency order:
 
 ```bash
-az deployment group what-if \
-  --resource-group <resource-group> \
-  --template-file outputs/bicep-templates/main.bicep \
-  --parameters outputs/bicep-templates/parameters/<env>.bicepparam
+for GROUP in networking security data monitoring messaging compute; do
+  MAIN_BICEP="outputs/bicep-templates/main.${GROUP}.bicep"
+  [ -f "$MAIN_BICEP" ] || continue
+  az deployment sub what-if \
+    --location <region> \
+    --template-file "$MAIN_BICEP" \
+    --parameters "outputs/bicep-templates/parameters/<env>/${GROUP}.bicepparam"
+done
 ```
 
-Show the what-if output to the user and ask for confirmation before proceeding if any **destructive changes** (deletes or modifications to existing resources) are detected.
+Show the what-if output to the user and ask for confirmation before proceeding if any **destructive changes** (deletes or modifications to existing resources) are detected — for any group.
 
 ---
 
 ## Step 4 — Deploy Bicep IaC
 
-Deploy the infrastructure first. Use the Azure CLI if authenticated; otherwise use the Azure MCP server deployment tools.
+Deploy the infrastructure first, **one group file at a time, in dependency order** (networking → security → data → monitoring → messaging → compute). Use the Azure CLI if authenticated; otherwise use the Azure MCP server deployment tools.
 
 ```bash
-az deployment group create \
-  --name "migration-deploy-<env>-$(date +%Y%m%d%H%M%S)" \
-  --resource-group <resource-group> \
-  --template-file outputs/bicep-templates/main.bicep \
-  --parameters outputs/bicep-templates/parameters/<env>.bicepparam \
-  --verbose
+for GROUP in networking security data monitoring messaging compute; do
+  MAIN_BICEP="outputs/bicep-templates/main.${GROUP}.bicep"
+  [ -f "$MAIN_BICEP" ] || continue
+
+  az deployment sub create \
+    --name "migration-deploy-${GROUP}-<env>-$(date +%Y%m%d%H%M%S)" \
+    --location <region> \
+    --template-file "$MAIN_BICEP" \
+    --parameters "outputs/bicep-templates/parameters/<env>/${GROUP}.bicepparam" \
+    --verbose
+
+  # Stop the whole deployment if a group fails — later groups may depend on it
+  if [ $? -ne 0 ]; then
+    echo "Deployment failed for group: $GROUP"
+    exit 1
+  fi
+done
 ```
 
-**On success:** Record the deployment name and outputs (e.g., Function App hostname, Storage Account name, Key Vault URI, Static Web App hostname/name) — these are needed for Steps 5 and 6.
+**On success:** Record each group's deployment name and outputs (e.g., Function App hostname from `compute`, Storage Account name from `data`, Key Vault URI from `security`, Static Web App hostname/name from `compute`) — these are needed for Steps 5 and 6.
 
-**On failure:** Print the full error from `az deployment operation group list`, identify the failing resource, and ask the user how to proceed. Do not attempt app code deployment if IaC failed.
+**On failure:** Print the full error from `az deployment operation sub list --name <deployment-name>`, identify the failing group and resource, and ask the user how to proceed. Do not attempt app code deployment if any IaC group failed, and do not deploy later groups if an earlier one failed.
 
 ---
 

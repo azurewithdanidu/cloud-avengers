@@ -35,66 +35,15 @@ Always run `./scripts/resolve-avm-version.sh` to get the latest — the table ab
 
 ## After Writing Bicep — Restore and Validate
 
+Run restore/build for **every** group file — there is no single root template anymore:
+
 ```bash
-# Pull modules into local .bicep/modules cache
-az bicep restore --file outputs/bicep-templates/main.bicep --force
-
-# Validate compilation — must exit 0 with no errors
-az bicep build --file outputs/bicep-templates/main.bicep
+# Pull modules into local .bicep/modules cache, then validate compilation — must exit 0 with no errors
+for f in outputs/bicep-templates/main.*.bicep; do
+  az bicep restore --file "$f" --force
+  az bicep build --file "$f"
+done
 ```
 
-## Module File Structure
+Next: [Step 4 — Group Assignment](04-group-assignment.md)
 
-Create one module per logical resource group:
-
-| Module file | Responsibility |
-|---|---|
-| `modules/networking.bicep` | VNet, subnets, NSGs, private DNS zones |
-| `modules/storage.bicep` | Storage accounts, private endpoints for storage |
-| `modules/security.bicep` | Key Vault, private endpoints for KV, RBAC assignments |
-| `modules/compute.bicep` | Function App, App Service Plan, App Insights |
-| `modules/messaging.bicep` | Service Bus namespace and queues (if used) |
-| `modules/monitoring.bicep` | Log Analytics workspace, diagnostic settings |
-
-Root `main.bicep` — only parameters, module calls, and outputs:
-
-```bicep
-param environment string
-param location string = resourceGroup().location
-param workload string
-
-module networking 'modules/networking.bicep' = {
-  name: 'networking'
-  params: { environment: environment, location: location, workload: workload }
-}
-
-module security 'modules/security.bicep' = {
-  name: 'security'
-  params: {
-    environment: environment
-    location: location
-    subnetId: networking.outputs.appSubnetId
-  }
-}
-
-module compute 'modules/compute.bicep' = {
-  name: 'compute'
-  params: {
-    environment: environment
-    location: location
-    keyVaultName: security.outputs.keyVaultName
-    storageAccountName: storage.outputs.storageAccountName
-  }
-  dependsOn: [security, storage]
-}
-```
-
-Dependency order (deploy in this sequence):
-1. `networking` — no deps
-2. `security` — depends on networking (subnet IDs)
-3. `storage` — depends on networking (subnet IDs)
-4. `monitoring` — no deps
-5. `compute` — depends on security, storage, monitoring
-6. `messaging` — depends on networking
-
-Next: [Step 4 — Common Pitfalls Checklist](04-pitfalls-checklist.md)

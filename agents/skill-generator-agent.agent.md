@@ -311,7 +311,7 @@ Use this map to avoid duplication and to find the right file to extend:
 | Skill | Covers |
 |---|---|
 | `smoke-testing` | End-to-end checks for 8 Azure service types |
-| `what-if-validation` | `az deployment group what-if` blocking condition checks |
+| `what-if-validation` | `az deployment sub what-if` blocking condition checks, run per grouped orchestrator file |
 
 ### Skills commonly used by `pipeline-builder-agent`
 | Skill | Covers |

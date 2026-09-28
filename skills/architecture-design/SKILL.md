@@ -60,7 +60,7 @@ The final document must contain these exact top-level sections and enough detail
 | `## 2. Current State` | AWS workload summary, source regions, integration boundaries, dependencies, pain points, and migration drivers |
 | `## 3. Service Mapping` | One row per AWS service showing Azure equivalent, SKU, rationale, and migration notes |
 | `## 4. Target Architecture` | Narrative of the Azure topology, ingress path, trust boundaries, data flow, and reference to the Mermaid diagram |
-| `## 5. Bicep Module Spec` | One subsection per module with parameters, resources, outputs, security controls, environment differences, and dependencies |
+| `## 5. Bicep Module Spec` | One subsection per resource, each assigned to a group (`main.<group>.bicep` — no local module files), with the AVM module, parameters, resources, outputs, cross-group references, security controls, environment differences, and dependencies |
 | `## 6. Function Rewrite Spec` | One subsection per Lambda-to-Function rewrite with triggers, SDK changes, env vars, auth, retries, and test notes |
 | `## 7. Security Design` | Identity, RBAC, Key Vault, encryption, WAF, secret handling, and compliance controls |
 | `## 8. Networking Design` | VNets, subnets, private endpoints, DNS, egress path, ingress path, and boundary decisions |

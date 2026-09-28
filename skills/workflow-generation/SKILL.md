@@ -22,7 +22,10 @@ When implementing the workflows specified in `design-document.md` Section 11.
 4. Pin all action versions explicitly.
 5. Write all files under `.github/workflows/`.
 
-**IaC deployment workflow pattern:**
+**IaC deployment workflow pattern** — there is no single `main.bicep`: deploy every grouped
+orchestrator file (`main.networking.bicep`, `main.security.bicep`, `main.data.bicep`,
+`main.monitoring.bicep`, `main.messaging.bicep`, `main.compute.bicep`, or whichever groups the
+workload uses) in dependency order, each with subscription-scope commands:
 
 ```yaml
 name: Deploy Infrastructure
@@ -58,33 +61,43 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Validate Bicep
-        run: az bicep build --file outputs/bicep-templates/main.bicep
-
-      - name: What-If Check
+      - name: Validate Bicep (every group file)
         run: |
-          az deployment group what-if \
-            --resource-group ${{ vars.RESOURCE_GROUP_NAME }} \
-            --template-file outputs/bicep-templates/main.bicep \
-            --parameters outputs/bicep-templates/parameters/${{ github.event.inputs.environment || 'staging' }}.bicepparam \
-            --mode Incremental
+          for f in outputs/bicep-templates/main.*.bicep; do
+            az bicep build --file "$f"
+          done
 
-      - name: Deploy
+      - name: Deploy every group, in dependency order
         id: deploy
+        env:
+          ENVIRONMENT: ${{ github.event.inputs.environment || 'staging' }}
         run: |
-          az deployment group create \
-            --name "deploy-${{ github.run_id }}" \
-            --resource-group ${{ vars.RESOURCE_GROUP_NAME }} \
-            --template-file outputs/bicep-templates/main.bicep \
-            --parameters outputs/bicep-templates/parameters/${{ github.event.inputs.environment || 'staging' }}.bicepparam \
-            --mode Incremental
+          set -e
+          for GROUP in networking security data monitoring messaging compute; do
+            MAIN_BICEP="outputs/bicep-templates/main.${GROUP}.bicep"
+            PARAM_FILE="outputs/bicep-templates/parameters/${ENVIRONMENT}/${GROUP}.bicepparam"
+            [ -f "$MAIN_BICEP" ] || continue
+
+            echo "=== What-If: $GROUP ==="
+            az deployment sub what-if \
+              --location ${{ vars.LOCATION }} \
+              --template-file "$MAIN_BICEP" \
+              --parameters "$PARAM_FILE"
+
+            echo "=== Deploy: $GROUP ==="
+            az deployment sub create \
+              --name "deploy-${GROUP}-${{ github.run_id }}" \
+              --location ${{ vars.LOCATION }} \
+              --template-file "$MAIN_BICEP" \
+              --parameters "$PARAM_FILE"
+          done
 
       - name: Rollback on failure
         if: failure() && steps.deploy.outcome == 'failure'
         run: |
-          az deployment group cancel \
-            --name "deploy-${{ github.run_id }}" \
-            --resource-group ${{ vars.RESOURCE_GROUP_NAME }} || true
+          # Cancel whichever group's deployment was in flight — name matches deploy-<group>-<run-id>
+          az deployment sub list --query "[?starts_with(name, 'deploy-') && contains(name, '${{ github.run_id }}')].name" -o tsv | \
+            xargs -I{} az deployment sub cancel --name {} || true
 ```
 
 **Azure Functions deployment workflow pattern:**
@@ -146,7 +159,8 @@ jobs:
 - **Always set `permissions: id-token: write`** — without this, OIDC token is not issued.
 - **Always pin action versions** — `actions/checkout@v4` not `@latest`. Never use a moving tag.
 - **Never put environment-specific values in workflow YAML** — always `${{ secrets.X }}` or `${{ vars.X }}`.
-- **Always include a what-if step before any `az deployment group create`** — never deploy without preview.
+- **Always include a what-if step before any `az deployment sub create`** — never deploy without preview.
+- **Deploy every `main.<group>.bicep` in dependency order** (networking → security → data → monitoring → messaging → compute) — never in parallel, and stop the job if an earlier group fails.
 - **Always include a rollback step** using `if: failure()` — the step should attempt to cancel the in-flight deployment.
 - **Never use `continue-on-error: true`** on deployment steps — fail fast.
 

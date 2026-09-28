@@ -58,11 +58,10 @@ Current Resume Point: discovery
 
 ### Phase 3a — IaC Transformation
 - [ ] Read Section 5 of `outputs/azure-architecture-output/design-document.md`
-- [ ] Write `outputs/bicep-templates/main.bicep`
-- [ ] Write module files under `outputs/bicep-templates/modules/`
-- [ ] Write `outputs/bicep-templates/parameters/dev.bicepparam`
-- [ ] Write `outputs/bicep-templates/parameters/staging.bicepparam`
-- [ ] Write `outputs/bicep-templates/parameters/prod.bicepparam`
+- [ ] Write `outputs/bicep-templates/main.<group>.bicep` for each group (networking, security, data, monitoring, messaging, compute — or a justified alternative), calling AVM modules directly (no local module files)
+- [ ] Write `outputs/bicep-templates/parameters/dev/<group>.bicepparam` for each deployed group
+- [ ] Write `outputs/bicep-templates/parameters/staging/<group>.bicepparam` for each deployed group
+- [ ] Write `outputs/bicep-templates/parameters/prod/<group>.bicepparam` for each deployed group
 
 ### Phase 3b — Code Refactor
 - [ ] Read Section 6 of `outputs/azure-architecture-output/design-document.md`

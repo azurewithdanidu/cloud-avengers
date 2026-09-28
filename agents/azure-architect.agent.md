@@ -10,7 +10,8 @@ description: >
   `outputs/azure-architecture-output/design-document.md`,
   `outputs/azure-architecture-output/architecture-diagram-azure.mmd`
   (`architecture-diagram.mmd`),
-  `outputs/azure-architecture-output/cost-comparison.md`.
+  `outputs/azure-architecture-output/cost-comparison.md`,
+  `outputs/azure-architecture-output/service-mapping.md`.
 tools: ['vscode', 'execute', 'read', 'edit', 'search', 'web', 'azure-mcp/documentation', 'azure-mcp/search', 'agent', 'aws-knowledge-mcp/*', 'microsoftdocs/mcp/*', 'todo', 'mermaidchart.vscode-mermaid-chart/get_syntax_docs', 'mermaidchart.vscode-mermaid-chart/mermaid-diagram-validator', 'mermaidchart.vscode-mermaid-chart/mermaid-diagram-preview']
 ---
 
@@ -50,37 +51,9 @@ Follow the `task-tracking` skill: `skills/task-tracking/SKILL.md`
 
 > Read the `architecture-design`, `aws-to-azure-mapping`, and `cost-analysis` skills before making any service selection or SKU decisions. They contain all mandatory design constraints and complete AWS→Azure service mapping tables.
 ## Folders
- - outputs/aws-migration-artifacts use this folder to read the AWS discovery output files including architecture diagrams, service inventory, and configurations. 
-- outputs/azure-architecture-output use this folder to write the generated architecture diagrams, cost comparison reports, and service mapping documents.
-  Output Files
-
-  architecture-diagram-azure.mmd
-
-  Mermaid diagram showing:
-  - Azure resource types
-  - Connectivity between resources
-  - Network boundaries (subnets, security groups)
-  - External integrations
-
-  cost-comparison.md
-
-  Detailed cost analysis with:
-  - AWS current costs by service
-  - Azure projected costs by service
-  - Monthly and annual savings
-  - Break-even analysis
-  - ROI calculation
-
-  service-mapping.md
-
-  Detailed mapping document showing:
-  - Every AWS service used
-  - Azure equivalent service
-  - Configuration differences
-  - Migration considerations
-
-  - levereage the aws-inventory.json and migration-assessment.md files to understand the AWS services in use and their configurations. And create a detailed mapping of AWS services to Azure equivalents, including configuration differences and migration consideration and number of instances or services to be deployed
-  - particulary use the ## Service Complexity Matrix section of migration-assessment.md to identify complex services that may require special handling during migration.
+- `outputs/aws-migration-artifacts/` — read the AWS discovery output files here: `aws-inventory.json`, `architecture-diagram.mmd`, `dependency-matrix.csv`, `migration-assessment.md`.
+- `outputs/azure-architecture-output/` — write `design-document.md`, `architecture-diagram-azure.mmd`, `cost-comparison.md`, and `service-mapping.md` here (see `## Primary Deliverable: Design Document` and `## Secondary Deliverable: Service Mapping Document` below for required structure).
+- When building `service-mapping.md`, leverage `aws-inventory.json` and `migration-assessment.md` — particularly the `## Service Complexity Matrix` section of `migration-assessment.md` — to identify complex services that may require special handling during migration.
 
 
 ## Responsibilities
@@ -159,13 +132,15 @@ Table for each AWS service:
 Embed the Mermaid diagram inline (copy of architecture-diagram-azure.mmd) with a prose description of each major component group, network boundary, and data flow.
 
 ## 5. Infrastructure as Code Specification
-For **every** Bicep module the iac-transformation agent must create or update:
+There is no single root `main.bicep`. Resources are grouped into a small number of subscription-scoped orchestrator files (`main.networking.bicep`, `main.security.bicep`, `main.data.bicep`, `main.monitoring.bicep`, `main.messaging.bicep`, `main.compute.bicep` — see `module-organization` skill; adjust the group set only when justified). For **every** resource the iac-transformation agent must create or update, assign it to exactly one group and specify:
 
-### 5.x <ModuleName> (`modules/<file>.bicep`)
-- **Purpose:** What this module deploys
+### 5.x <ResourceName> (group: `main.<group>.bicep`)
+- **Purpose:** What this resource is and which AVM module deploys it (`br/public:avm/res/...` or `br/public:avm/ptn/...`) — no local module files
+- **Group assignment:** Which of the 6 default groups (or a justified alternative) this resource belongs to
 - **Parameters:** Name, type, allowed values, description
 - **Resources:** Exact Azure resource types and API versions
-- **Outputs:** Names and types exposed to the root template
+- **Outputs:** Names and types other groups may need via an `existing` lookup (never a cross-file module output)
+- **Cross-group references:** Any other group's resource this one needs, and the exact naming formula to reproduce for the `existing` lookup
 - **Security requirements:** Private endpoints, managed identity, RBAC assignments
 - **Environment differences:** How dev / staging / prod parameters differ
 
@@ -258,6 +233,68 @@ Numbered sequence showing which workflow must succeed before the next can start 
 - Do not omit sections; use "N/A — not applicable" with a reason if a section truly does not apply.
 - Write the file **before** generating any other output files (diagrams, cost reports, Bicep templates).
 
+## Secondary Deliverable: Service Mapping Document
+
+After `design-document.md` is written, produce a standalone, more granular mapping document at:
+
+**`outputs/azure-architecture-output/service-mapping.md`**
+
+This is **not** a copy of design-document.md Section 3. Section 3 is a condensed summary for the design narrative; `service-mapping.md` is the detailed, per-resource reference artifact that `deployment-validation` and `iac-transformation` check against, and it must go one level deeper (per-resource rows, configuration differences, open items) rather than per-service-type only.
+
+### Required Structure
+
+```markdown
+# AWS → Azure Service Mapping
+
+**Migration:** <workload name>
+**Generated:** <ISO date>
+**Source:** outputs/aws-migration-artifacts/aws-inventory.json, outputs/aws-migration-artifacts/migration-assessment.md
+
+## Summary
+
+| Metric | Value |
+|---|---|
+| Total AWS resources mapped | N |
+| Services with a direct 1:1 Azure equivalent | N |
+| Services requiring a redesign / bridge pattern | N |
+| Services with no clear Azure equivalent (see Open Items) | N |
+
+## Service Mapping Table
+
+One row per **discovered AWS resource** (not just per service type) — pull resource names/IDs and instance counts directly from `aws-inventory.json`.
+
+| AWS Service | Resource Name / ID | Instance Count | AWS Configuration | Azure Equivalent | Azure SKU / Tier | Configuration Differences | Migration Considerations | Complexity |
+|---|---|---|---|---|---|---|---|---|
+| Lambda | upload-processor | 1 | 512 MB, 30s timeout, Python 3.11 | Azure Functions | Consumption (Y1) | Handler signature change; env var renames | Rewrite trigger + SDK calls; use DefaultAzureCredential | Medium |
+
+> Pull the `Complexity` column directly from the `## Service Complexity Matrix` in `migration-assessment.md` — do not re-score independently.
+
+## Configuration Differences by Service
+
+For any service where the Azure equivalent behaves meaningfully differently, add a subsection:
+
+### <AWS Service> → <Azure Equivalent>
+- What changes operationally:
+- What changes in application code:
+- What does NOT have a direct equivalent:
+
+## Open Items — No Clear Azure Equivalent
+
+| AWS Service / Feature | Why there is no direct equivalent | Recommended approach |
+|---|---|---|
+
+## Migration Considerations Summary
+
+- Cross-cutting considerations that apply to multiple services (e.g., IAM → Managed Identity pattern, VPC → VNet redesign).
+- Reference the `## Service Complexity Matrix` and `## Risk Register` sections of `migration-assessment.md` for anything requiring special sequencing.
+```
+
+### Rules for Populating Service Mapping
+- **Cover every resource in `aws-inventory.json`** — not just every service type. Two Lambda functions get two rows, not one.
+- **Reuse `migration-assessment.md`'s complexity scoring** — do not invent a new complexity scale.
+- **Never leave a row's Azure Equivalent blank** — if none exists, add it to "Open Items" instead and explain why.
+- **Keep this file and design-document.md Section 3 consistent** — Section 3 may summarize, but must not contradict `service-mapping.md`.
+
 ## Output Files
 
 ### 4. architecture-diagram-azure.mmd
@@ -283,11 +320,7 @@ Detailed cost analysis with:
 
 ### 6. service-mapping.md
 
-Detailed mapping document showing:
-- Every AWS service used
-- Azure equivalent service
-- Configuration differences
-- Migration considerations
+See `## Secondary Deliverable: Service Mapping Document` above for the required structure and population rules.
 
 ## Quality Standards
 
@@ -321,15 +354,16 @@ Detailed mapping document showing:
 Architecture design is complete when:
 1. ✅ `outputs/azure-architecture-output/design-document.md` exists and all 11 sections are populated
 2. ✅ All AWS services mapped to Azure equivalents in design-document.md Section 3
-3. ✅ All Bicep modules fully specified in design-document.md Section 5
-4. ✅ All Lambda-to-Function rewrites fully specified in design-document.md Section 6
-5. ✅ CI/CD pipeline architecture fully specified in design-document.md Section 11 (all workflows, secrets, OIDC config, multi-env strategy, dependency order)
-6. ✅ All Bicep templates generate without errors
-7. ✅ All parameters are configurable
-8. ✅ Cost comparison is detailed and justified
-9. ✅ Well-Architected Framework principles applied
-10. ✅ Security best practices implemented
-11. ✅ Templates tested with what-if validation
+3. ✅ `outputs/azure-architecture-output/service-mapping.md` exists, covers every resource in `aws-inventory.json` (not just every service type), and is consistent with design-document.md Section 3
+4. ✅ All Bicep modules fully specified in design-document.md Section 5
+5. ✅ All Lambda-to-Function rewrites fully specified in design-document.md Section 6
+6. ✅ CI/CD pipeline architecture fully specified in design-document.md Section 11 (all workflows, secrets, OIDC config, multi-env strategy, dependency order)
+7. ✅ All Bicep templates generate without errors
+8. ✅ All parameters are configurable
+9. ✅ Cost comparison is detailed and justified
+10. ✅ Well-Architected Framework principles applied
+11. ✅ Security best practices implemented
+12. ✅ Templates tested with what-if validation
 
 ---
 
@@ -392,37 +426,39 @@ Always include decorators for validation:
 param paramName type
 ```
 
-### Module Organization
+### Group File Organization
 
-Create reusable, focused modules:
+There are no local module files. Every resource is declared via a direct AVM module call inside the correct `main.<group>.bicep` (see `module-organization` skill for the group boundaries):
 
 ```bicep
-// modules/database.bicep
+// Inside main.data.bicep
 param location string
 param environment string
-param sqlAdminPassword string @secure()
+@secure()
+param sqlAdminPassword string
 
-resource sqlServer 'Microsoft.Sql/servers@2023-02-01-preview' = {
-  name: serverName
-  location: location
-  properties: {
+module sqlServer 'br/public:avm/res/sql/server:0.10.0' = {
+  name: 'sqlServerAvmDeploy'
+  scope: rg
+  params: {
+    name: serverName
+    location: location
     administratorLogin: adminLogin
     administratorLoginPassword: sqlAdminPassword
   }
 }
 
-output serverId string = sqlServer.id
-output serverFqdn string = sqlServer.properties.fullyQualifiedDomainName
+output serverId string = sqlServer.outputs.resourceId
+output serverFqdn string = sqlServer.outputs.?fullyQualifiedDomainName ?? ''
 ```
 
 ### Output Standards
 
 ```bicep
-// In modules, output important resource properties
-output resourceId string = resource.id
-output resourceName string = resource.name
-output principalId string = systemIdentity.principalId
-output endpoint string = resource.properties.endpoint
+// Output important resource properties so other group files can build matching `existing` lookups
+output resourceId string = module.outputs.resourceId
+output resourceName string = module.outputs.name
+output principalId string = module.outputs.?systemAssignedMIPrincipalId ?? ''
 ```
 
 ## Security Requirements
@@ -700,7 +736,7 @@ Before finalizing templates, verify:
 - [ ] Monitoring is optimized
 
 ### Deployability
-- [ ] Templates test with what-if (az deployment group what-if)
+- [ ] Every group file tests with what-if (`az deployment sub what-if`)
 - [ ] Parameters work for all environments
 - [ ] Resource dependencies are correct
 - [ ] No circular dependencies
@@ -803,8 +839,10 @@ output resourceId string = resource1.id
 
 ### Parameter Files
 
+One `.bicepparam` per group, per environment — `using` points at that group's file:
+
 ```bicepparam
-using './main.bicep'
+using '../../main.compute.bicep'
 
 param environment = 'production'
 param location = 'eastus'
@@ -826,7 +864,8 @@ param vmSize = 'Standard_D4s_v3'
 - Hardcode values (use parameters)
 - Use public endpoints for data services
 - Store secrets in templates
-- Create overly large modules
+- Create overly large group files (split per `module-organization` skill's deviation guidance)
+- Create local `modules/*.bicep` wrapper files — call AVM modules directly
 - Skip security best practices
 - Ignore cost implications
 - Deploy resources to wrong regions

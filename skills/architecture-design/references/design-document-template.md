@@ -52,16 +52,20 @@ Use this as the starting structure for `outputs/azure-architecture-output/design
 4. Failure and retry path:
 
 ## 5. Bicep Module Spec
-### 5.1 `<module-name>` (`modules/<file>.bicep`)
+### 5.1 `<resource-name>` (group: `main.<group>.bicep`)
 - Purpose:
+- AVM module (`br/public:avm/res/...` or `br/public:avm/ptn/...`) — no local module files:
+- Group assignment (networking/security/data/monitoring/messaging/compute, or justified alternative):
 - Parameters:
 - Resources and API versions:
-- Required outputs:
+- Required outputs (for cross-group `existing` lookups):
+- Cross-group references and the exact naming formula to reproduce:
 - Security controls:
 - Environment differences:
 - Dependencies:
 
-### 5.n Repeat for every module
+### 5.n Repeat for every resource
+
 
 ## 6. Function Rewrite Spec
 ### 6.1 `<function-name>`

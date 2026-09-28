@@ -16,17 +16,21 @@
 
 ## Bicep — Redeploy Previous Template
 
+Roll back one group at a time (the group that failed, or every group deployed in this run) —
+subscription scope, since each `main.<group>.bicep` creates the resource group itself:
+
 ```yaml
 - name: Rollback IaC to previous commit
   if: failure()
   run: |
     PREV_SHA=$(git rev-parse HEAD~1)
-    git show $PREV_SHA:outputs/bicep-templates/main.bicep > /tmp/main-prev.bicep
-    az deployment group create \
-      --resource-group ${{ vars.RESOURCE_GROUP_NAME }} \
-      --template-file /tmp/main-prev.bicep \
-      --parameters outputs/bicep-templates/parameters/${{ vars.ENV }}.bicepparam \
-      --name "rollback-${{ github.run_id }}"
+    GROUP=${{ vars.FAILED_GROUP }}   # e.g. compute — the group that failed
+    git show $PREV_SHA:outputs/bicep-templates/main.$GROUP.bicep > /tmp/main-$GROUP-prev.bicep
+    az deployment sub create \
+      --location ${{ vars.LOCATION }} \
+      --template-file /tmp/main-$GROUP-prev.bicep \
+      --parameters outputs/bicep-templates/parameters/${{ vars.ENV }}/$GROUP.bicepparam \
+      --name "rollback-$GROUP-${{ github.run_id }}"
 ```
 
 ## General Rollback Rules

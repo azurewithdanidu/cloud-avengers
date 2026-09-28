@@ -58,10 +58,10 @@ Current Resume Point: parallel
 
 ### Phase 3a — IaC Transformation
 - [x] Read Section 5 of `outputs/azure-architecture-output/design-document.md` — completed 2026-07-14T00:56:18Z
-- [x] Generate `modules/networking.bicep` — virtual network, subnets, private DNS — completed 2026-07-14T00:58:37Z
-- [x] Generate `modules/function-app.bicep` — function app, plan, identity — completed 2026-07-14T01:01:12Z
-- [ ] Write `outputs/bicep-templates/main.bicep`
-- [ ] Write `outputs/bicep-templates/parameters/dev.bicepparam`
+- [x] Write `main.networking.bicep` — virtual network, subnets, private DNS — completed 2026-07-14T00:58:37Z
+- [x] Write `main.compute.bicep` — function app, plan, identity — completed 2026-07-14T01:01:12Z
+- [ ] Write `outputs/bicep-templates/main.data.bicep`
+- [ ] Write `outputs/bicep-templates/parameters/dev/networking.bicepparam`
 
 ### Phase 3b — Code Refactor
 - [x] Read Section 6 of `outputs/azure-architecture-output/design-document.md` — completed 2026-07-14T00:55:49Z
