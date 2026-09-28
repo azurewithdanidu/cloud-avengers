@@ -14,7 +14,14 @@ Produce environment-specific parameter files that allow the same grouped Bicep o
 
 After the `main.<group>.bicep` files are written, before any deployment validation.
 
-## Universal Parameter Discovery Process
+## Inputs
+
+| Path | Why it matters |
+|---|---|
+| `outputs/azure-architecture-output/design-document.md` | Section 5 lists deployed modules (drives which parameters are needed); Section 7 provides per-environment location and workload name |
+| `outputs/bicep-templates/main.bicep` | Declares the parameter names that .bicepparam files must satisfy |
+| `outputs/bicep-templates/modules/` | Per-module Bicep files confirm parameter types and decorators |
+## Process
 
 1. **Enumerate deployed resources per group** — Read `design-document.md` Section 5 (resource list) and the group assignment from the `module-organization` skill. For each resource, look up which parameters it contributes using the **Service Parameter Catalog** below, and note which group file (`networking`/`security`/`data`/`monitoring`/`messaging`/`compute`) it belongs to.
 2. **Read per-environment values** — Read `design-document.md` Section 7 (Environment Configuration table). Record the target `location` and `workload` name.
@@ -144,7 +151,7 @@ Repeat the same three files under `parameters/staging/` and `parameters/prod/` w
 - **Always use Burstable SKU for dev databases, General Purpose for prod** — never swap these.
 - **Never commit `.bicepparam` files with actual secret values** — `@secure()` params must be passed at deploy time or via Key Vault.
 
-## Output
+## Outputs
 
 - `outputs/bicep-templates/parameters/dev/<group>.bicepparam` — one per deployed group
 - `outputs/bicep-templates/parameters/staging/<group>.bicepparam` — one per deployed group
@@ -153,7 +160,7 @@ Repeat the same three files under `parameters/staging/` and `parameters/prod/` w
 
 ---
 
-## Companion Scripts
+## Scripts
 
 | Script | Purpose |
 |---|---|

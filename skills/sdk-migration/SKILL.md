@@ -14,6 +14,13 @@ Replace every boto3 (Python), `@aws-sdk` (Node.js/TypeScript), and AWS SDK v2 (J
 
 When rewriting Lambda source files or other application code that contains boto3, `@aws-sdk`, or `software.amazon.awssdk` imports.
 
+## Inputs
+
+| Path | Why it matters |
+|---|---|
+| `source-app/app-code/lambda/` | Source Lambda handlers containing boto3 / @aws-sdk calls to replace |
+| `outputs/azure-architecture-output/design-document.md` | Section 6 specifies the target SDK, auth pattern, and environment variable names per function |
+| `outputs/azure-functions/requirements.txt` | Updated with Azure SDK packages as replacements are made |
 ## Process
 
 1. Scan the source for all AWS SDK usage:
@@ -78,7 +85,7 @@ Load only the file relevant to the current task — do not load all of them:
 - **Always update `requirements.txt`** with every new Azure package added.
 - **Always use Python 3.11** — 3.12 and 3.13 are not supported by Azure Functions v4.
 
-## Output
+## Outputs
 
 - Refactored Python/TypeScript files with zero boto3 / @aws-sdk references
 - `outputs/azure-functions/requirements.txt` listing all Azure SDK packages used
@@ -86,7 +93,7 @@ Load only the file relevant to the current task — do not load all of them:
 
 ---
 
-## Companion Scripts
+## Scripts
 
 | Script | Purpose |
 |---|---|
