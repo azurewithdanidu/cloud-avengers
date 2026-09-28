@@ -11,10 +11,10 @@ SCRIPT="$BATS_TEST_DIRNAME/../../skills/module-organization/scripts/validate-bic
   [ -x "$SCRIPT" ]
 }
 
-@test "validate-bicep.sh fails when main.bicep is not found" {
+@test "validate-bicep.sh fails when no group files are found" {
   run bash "$SCRIPT" --bicep-root /nonexistent/path
   [ "$status" -ne 0 ]
-  [[ "$output" == *"main.bicep not found"* ]]
+  [[ "$output" == *"group files found under"* ]]
 }
 
 @test "validate-bicep.sh rejects unknown flags" {
@@ -30,6 +30,6 @@ SCRIPT="$BATS_TEST_DIRNAME/../../skills/module-organization/scripts/validate-bic
   grep -q "bicep build" "$SCRIPT"
 }
 
-@test "validate-bicep.sh skips what-if when no resource-group is given" {
-  grep -q "resource-group.*not supplied.*skipping what-if" "$SCRIPT"
+@test "validate-bicep.sh skips what-if when no environment is given" {
+  grep -q "environment.*not supplied.*skipping what-if" "$SCRIPT"
 }

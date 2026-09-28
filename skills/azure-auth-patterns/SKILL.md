@@ -17,6 +17,10 @@ Replace all AWS IAM-based authentication patterns with Azure Managed Identity an
 - When configuring app settings that reference downstream services
 - Any time a service needs to authenticate to another Azure service
 
+**When NOT to use:**
+- Do not run `scripts/assign-rbac.*` against a live subscription without explicit user confirmation of the principal, scope, and role — it is a mutating, privileged operation (`az role assignment create`), not a read-only check.
+- Do not use this skill to grant `Owner` or subscription-scoped roles — see Rules below for least-privilege requirements.
+
 ## Inputs
 
 | Path | Why it matters |
@@ -116,6 +120,10 @@ Replace all AWS IAM-based authentication patterns with Azure Managed Identity an
 |---|---|
 | `scripts/assign-rbac.ps1` | Idempotent RBAC role assignment with pre-populated built-in role GUIDs |
 
+**Approval gate:** this script calls `az role assignment create` and mutates live Azure RBAC state.
+Confirm the principal ID, scope, and role with the user before running it — do not invoke it as an
+unattended step of code generation or refactoring.
+
 Use to assign any built-in role to a managed identity:
 
 ```powershell
@@ -184,4 +192,3 @@ fi
 ```
 
 **Parameter naming convention:** Bash uses `--kebab-case`; PowerShell uses `-PascalCase`. Both produce identical output.
-

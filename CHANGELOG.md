@@ -7,26 +7,28 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ---
 
-## [1.3.0] - 2026-07-22
+## [1.3.0] - 2026-09-29
+
+### Added
+
+- **`service-mapping.md` promoted to a fully-specified, standalone deliverable** for `azure-architect` — per-resource AWS→Azure mapping table, configuration differences, open items with no Azure equivalent, and a migration considerations summary, distinct from the condensed table in `design-document.md` Section 3.
+- **Grouped, subscription-scoped Bicep orchestrator convention** — replaces the single `main.bicep` + local `modules/*.bicep` pattern with `main.<group>.bicep` files (`networking`/`security`/`data`/`monitoring`/`messaging`/`compute`) that call AVM modules directly. No local module files. Cross-group references use deterministic-naming `existing` resource lookups instead of module outputs.
+- **`steps/` and `references/` progressive-disclosure structure** for the 12 largest skills, splitting monolithic `SKILL.md` files (up to 664 lines) into ordered step files and reference/lookup files — every `SKILL.md` is now under 230 lines.
+- Explicit approval-gate / "when not to use" guidance for skills whose companion scripts perform privileged, mutating operations (`azure-auth-patterns`, `github-actions-oidc`).
 
 ### Changed
 
-- **Skill schema standardised across all 22 SKILL.md files** — every skill now conforms to the canonical 8-section schema: Purpose → When to Use → Inputs → Outputs → Process → Rules → Scripts → References
-  - `## Output` → `## Outputs` renamed in 13 skills
-  - `## Companion Scripts` → `## Scripts` renamed in 8 skills
-  - `## Inputs` table added to 14 skills that were missing it
-  - `## Process` heading added where missing (`azure-auth-patterns`, `github-actions-oidc`, `what-if-validation`)
-  - `## When to Use` added to `cost-estimator`
-  - `## Universal Parameter Discovery Process` → `## Process` in `parameter-management`
-  - `## Output Format` → `## Outputs` in `cost-estimator`
-- **Phase prompts in `skills/phase-delegation/SKILL.md` are now the single source of truth** — all 5 phase prompts (Phases 1, 2, 3a, 3b, 3c, 4) updated with:
-  - Explicit skill references so sub-agents read the correct SKILL.md before acting
-  - Multi-region scan instruction (Phase 1)
-  - Incremental task plan update rule in every phase
-  - MCP-only discovery rule (Phase 1 — no AWS CLI)
-  - Blocker-continue and auth-fail-stop rules (Phase 1)
-  - Referenced skills per phase: `aws-inventory-scan`, `migration-assessment` (P1); `architecture-design`, `aws-to-azure-mapping`, `architecture-diagramming`, `cost-estimator`, `cost-analysis`, `azure-security-patterns`, `azure-auth-patterns` (P2); `bicep-generation`, `module-organization`, `parameter-management` (P3a); `lambda-to-functions`, `sdk-migration` (P3b); `github-actions-oidc`, `multi-env-strategy`, `workflow-generation` (P3c); `what-if-validation`, `smoke-testing` (P4)
-- **`agents/migration-project-manager.agent.md` phase sections** — all inline prompts replaced with pointers to `skills/phase-delegation/SKILL.md`, eliminating prompt drift between the two files
+- `skills/module-organization`, `skills/bicep-generation`, `skills/parameter-management`, `skills/what-if-validation` rewritten for the grouped orchestrator convention; validation scripts (`validate-bicep.*`, `run-what-if.*`) now loop over every `main.*.bicep` group file instead of a single template.
+- `agents/iac-transformation.agent.md`, `agents/azure-deployer.agent.md`, `agents/azure-architect.agent.md`, `agents/migration-project-manager.agent.md` updated for grouped-orchestrator deployment order and per-group parameter files (`parameters/<env>/<group>.bicepparam`).
+- CI/CD examples in `skills/github-actions-oidc` and `skills/workflow-generation` updated to deploy each group file in dependency order using `az deployment sub` commands.
+- `agents/skill-generator-agent.agent.md` documents when to use `steps/` vs `references/` vs inline content when authoring or restructuring skills.
+
+### Fixed
+
+- `migration-assessment/SKILL.md` had its `## References` section and part of a resource template trapped inside an unclosed Markdown code fence — never rendered as real content.
+- Duplicate `### 9.` section numbering in `orchestration/SKILL.md` and `bicep-generation/SKILL.md`.
+- Dangling "Runtime Detection" sections referencing nonexistent `scripts/*.sh|ps1` in skills with no `scripts/` folder (`lambda-to-functions`, `multi-env-strategy`, `workflow-generation`).
+- Removed orphaned, unreferenced duplicate script folders `skills/deployment-validation/` and `skills/shared/` (one contained an empty/broken `smoke-test.sh`).
 
 ---
 

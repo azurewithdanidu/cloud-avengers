@@ -17,19 +17,19 @@ SCRIPT="$BATS_TEST_DIRNAME/../../skills/what-if-validation/scripts/run-what-if.s
 }
 
 @test "run-what-if.sh fails without --resource-group" {
-  run bash "$SCRIPT" --environment dev
+  run bash "$SCRIPT" --location australiaeast --environment dev
   [ "$status" -ne 0 ]
   [[ "$output" == *"resource-group"* ]]
 }
 
 @test "run-what-if.sh fails without --environment" {
-  run bash "$SCRIPT" --resource-group myRG
+  run bash "$SCRIPT" --location australiaeast --resource-group myRG
   [ "$status" -ne 0 ]
   [[ "$output" == *"environment"* ]]
 }
 
 @test "run-what-if.sh rejects invalid --environment value" {
-  run bash "$SCRIPT" --resource-group myRG --environment production
+  run bash "$SCRIPT" --location australiaeast --resource-group myRG --environment production
   [ "$status" -ne 0 ]
   [[ "$output" == *"dev, staging, or prod"* ]]
 }

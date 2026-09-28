@@ -40,25 +40,10 @@ Create a transparent, evidence-based cost comparison that shows current AWS spen
 3. If real cost data is incomplete, estimate missing services from `aws-inventory.json` and the source architecture.
 4. Record every missing-data assumption in the cost report.
 
-### 2. Estimate unknown AWS costs from instance types and workload shape
 
-Use these fallback formulas when actual AWS billing is unknown:
+### 2. Estimate unknown AWS costs
 
-| AWS service | Estimation method |
-|---|---|
-| EC2 | `instance_count * hourly_rate(instance_type) * 730 + attached_storage_gb * storage_rate + outbound_data_gb * egress_rate` |
-| Lambda | `request_count * request_rate + (memory_gb * avg_duration_seconds * request_count) * GBs_rate` |
-| S3 | `stored_gb * storage_rate + PUT_requests * put_rate + GET_requests * get_rate + outbound_gb * egress_rate` |
-| RDS | `instance_hours * class_rate + storage_gb * storage_rate + provisioned_iops * iops_rate` |
-| DynamoDB | `read_units + write_units + storage_gb + backups + streams if used` |
-| NAT Gateway | `hours * hourly_rate + processed_gb * data_processing_rate` |
-| CloudWatch | `ingested_gb * log_rate + metrics_count * metric_rate + retained_gb * retention_rate` |
-
-If a service still cannot be estimated precisely:
-
-- pick the closest known instance class or usage tier
-- state the proxy explicitly
-- add a sensitivity range of at least ±15%
+See [references/cost-formulas.md](references/cost-formulas.md) for the fallback estimation formulas by AWS service (EC2, Lambda, S3, RDS, DynamoDB, NAT Gateway, CloudWatch) when actual billing data is unavailable.
 
 ### 3. Azure monthly costing workflow
 
@@ -68,145 +53,14 @@ If a service still cannot be estimated precisely:
 4. Show reservation scenarios when the service is eligible and the workload has a stable baseline.
 5. Include egress and ancillary costs such as monitoring, DNS, and Front Door where applicable.
 
-### 4. Data egress cost formulas
 
-Always model egress explicitly. Use these formulas and explain the chosen rates:
+### 4-6. Egress, reservation, and break-even formulas
 
-- **AWS egress monthly**
-
-  `AWS_Egress_Monthly = max(AWS_GB_Out - AWS_Free_GB, 0) * AWS_Egress_Rate_Per_GB`
-
-- **Azure egress monthly**
-
-  `Azure_Egress_Monthly = max(Azure_GB_Out - Azure_Free_GB, 0) * Azure_Egress_Rate_Per_GB`
-
-- **Front Door egress contribution**
-
-  `FrontDoor_Data_Cost = FrontDoor_GB_Out * FrontDoor_Rate_Per_GB`
-
-- **Inter-region transfer**
-
-  `InterRegion_Cost = InterRegion_GB * InterRegion_Rate_Per_GB`
-
-- **Total network cost**
-
-  `Total_Network_Cost = Egress + CDN_or_FrontDoor + InterRegion + NAT_or_Equivalent`
-
-Worked egress example:
-
-- 2,500 GB/month outbound
-- 100 GB free allowance
-- $0.087 per GB effective rate
-- `max(2500 - 100, 0) * 0.087 = $208.80/month`
-
-### 5. Azure Reservations savings calculations
-
-When the workload has predictable baseline compute or database usage, show reservation scenarios.
-
-Formulas:
-
-- `Reserved_1yr_Monthly = PAYG_Monthly * (1 - Savings_Rate_1yr)`
-- `Reserved_3yr_Monthly = PAYG_Monthly * (1 - Savings_Rate_3yr)`
-- `Savings_Percent = (PAYG_Monthly - Reserved_Monthly) / PAYG_Monthly * 100`
-
-Example using placeholder savings rates:
-
-- Baseline eligible Azure compute: `$800/month`
-- 1-year reservation savings rate: `38%`
-- 3-year reservation savings rate: `57%`
-- `Reserved_1yr_Monthly = 800 * (1 - 0.38) = $496/month`
-- `Reserved_3yr_Monthly = 800 * (1 - 0.57) = $344/month`
-
-Use current documented or calculator-derived savings inputs; do not hardcode stale percentages without citation.
-
-### 6. Break-even formula with worked example
-
-Use this formula whenever migration one-time cost is known or estimated:
-
-- `Monthly_Savings = AWS_Monthly - Azure_Monthly`
-- `BreakEven_Months = Migration_OneTime_Cost / Monthly_Savings`
-
-Worked example:
-
-- Current AWS monthly cost: `$2,450`
-- Projected Azure pay-as-you-go monthly cost: `$1,850`
-- Migration one-time cost: `$18,000`
-- `Monthly_Savings = 2450 - 1850 = $600`
-- `BreakEven_Months = 18000 / 600 = 30 months`
-
-Reservation comparison:
-
-- Azure 1-year reserved monthly cost: `$1,620` → monthly savings `$830` → break-even `21.7 months`
-- Azure 3-year reserved monthly cost: `$1,480` → monthly savings `$970` → break-even `18.6 months`
-
-If `Monthly_Savings <= 0`, state that there is no break-even under the modeled scenario.
+See [references/cost-formulas.md](references/cost-formulas.md) for the data egress cost formulas, Azure Reservations savings calculations, and the break-even formula — each with a worked example.
 
 ### 7. Complete `cost-comparison.md` template
 
-Use this full template for `outputs/azure-architecture-output/cost-comparison.md`:
-
-```markdown
-# Cost Comparison: AWS vs Azure
-
-## 1. Executive Summary
-- Current AWS monthly estimate:
-- Projected Azure monthly estimate:
-- Monthly delta:
-- One-time migration cost:
-- Break-even:
-
-## 2. Scope and Inputs
-- Discovery artifacts used:
-- Source billing or documentation used:
-- Target Azure services modeled:
-- Currency and pricing date:
-
-## 3. AWS Current Monthly Cost Baseline
-| Service Category | Service | Quantity / Usage | Monthly Cost | Source / Assumption |
-|---|---|---|---|---|
-
-## 4. Azure Projected Monthly Cost (Pay-as-you-go)
-| Service Category | Azure Service | SKU / Tier | Quantity / Usage | Monthly Cost | Source / Assumption |
-|---|---|---|---|---|---|
-
-## 5. Reservation and Commitment Scenarios
-| Scenario | Eligible Spend | Monthly Cost | Savings vs PAYG | Notes |
-|---|---|---|---|---|
-| Pay-as-you-go |  |  |  |  |
-| 1-year reservation |  |  |  |  |
-| 3-year reservation |  |  |  |  |
-
-## 6. Network and Data Egress
-- AWS egress formula and result:
-- Azure egress formula and result:
-- Front Door or CDN contribution:
-- Inter-region data transfer assumptions:
-
-## 7. Monthly Cost Summary
-| Category | AWS | Azure PAYG | Azure 1yr Reserved | Azure 3yr Reserved | Delta vs AWS |
-|---|---|---|---|---|---|
-
-## 8. Break-even and ROI
-- One-time migration cost:
-- Monthly savings by scenario:
-- Break-even months by scenario:
-- 3-year ROI by scenario:
-
-## 9. Assumptions and Unknowns
-- Document every assumption.
-- Mark every estimated AWS cost explicitly.
-- Call out excluded costs such as enterprise support, shared landing zone cost, or team labor if omitted.
-
-## 10. Sensitivity and Risk Notes
-- Traffic growth sensitivity:
-- Reservation commitment risk:
-- Services with the highest estimate uncertainty:
-
-## 11. Recommendation
-- Recommended Azure pricing posture:
-- Conditions that would change the decision:
-- Next pricing validation step:
-```
+Use the full template in [references/cost-comparison-template.md](references/cost-comparison-template.md) for `outputs/azure-architecture-output/cost-comparison.md`.
 
 ### 8. Edge Cases / Failure Modes
 

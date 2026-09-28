@@ -142,9 +142,8 @@ Last Updated: <timestamp>
 
 ### Phase 3a — IaC Transformation
 <!-- Populated from design-document.md Section 5 after Phase 2 -->
-- [ ] Generate main.bicep
-- [ ] Generate Bicep modules (to be detailed after Phase 2)
-- [ ] Generate parameter files (dev / staging / prod)
+- [ ] Generate main.<group>.bicep for each group (networking, security, data, monitoring, messaging, compute — or a justified alternative), calling AVM modules directly (no local module files)
+- [ ] Generate parameter files per group (dev / staging / prod)
 
 ### Phase 3b — Code Refactor
 <!-- Populated from design-document.md Section 6 after Phase 2 -->
@@ -278,14 +277,13 @@ other — all three consume the Phase 2 design document and write to different o
 **Agent to invoke:** `@iac-transformation`
 
 **Exact prompt to send:**
-
 > Use the **Phase 3a copy-paste prompt** from `skills/phase-delegation/SKILL.md`.  
 > Do not paraphrase or shorten the prompt.
+> Phase 3a has no `<placeholder>` values; send the prompt exactly as written.
 
 **Artifact completion check:**
-- `outputs/bicep-templates/main.bicep` exists
-- At least one file under `outputs/bicep-templates/modules/`
-- `outputs/bicep-templates/parameters/dev.bicepparam` exists
+- At least one `outputs/bicep-templates/main.*.bicep` group file exists
+- `outputs/bicep-templates/parameters/dev/` contains at least one `.bicepparam` file
 
 ### Phase 3b — Application Code Refactor
 
@@ -329,6 +327,7 @@ proceed to Phase 4.
 
 > Use the **Phase 4 copy-paste prompt** from `skills/phase-delegation/SKILL.md`.  
 > Do not paraphrase or shorten the prompt.
+> Preserve the requirement that `outputs/validation-report.md` starts with `## Status: PASSED` or `## Status: FAILED`.
 
 **Artifact completion check:**
 - `outputs/validation-report.md` exists

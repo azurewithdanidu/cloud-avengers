@@ -98,220 +98,32 @@ Phase 4 Validation
 2. Treat Phase 3 as a coordination group, not a single artifact.
 3. Read `design-document.md` Sections 5, 6, and 11 after Phase 2 and expand the Phase 3 task lists before any Phase 3 verification is finalized.
 
+
 ### 4. Resume-from-phase procedure
 
-Follow this exact recovery workflow:
-
-1. Read the latest `outputs/migration-task-plan.md`.
-2. Identify the requested resume point or the first phase that is not `✅`.
-3. Re-run artifact checks for every prerequisite phase.
-4. If a prerequisite row shows `✅` but the artifact check fails, immediately change that row to `❌`, add a blocker, and stop.
-5. If a prerequisite row is stale (`⏳` or `🔄`) but all required artifacts exist and pass checks, repair the row to `✅` and write the recovery timestamp.
-6. Mark the resumed phase `🔄` only after prerequisites pass.
-7. Re-read the plan again before each write so concurrent updates are not lost.
-
-#### Resume `discovery`
-
-- Allowed when no later phase has valid artifacts yet, or when Phase 1 artifacts are missing or invalid.
-- Before running, confirm that later phases are either `⏳`, `🔄`, or already marked `❌` because of discovery issues.
-- After success, reset downstream phases only if their artifacts are now inconsistent with the new discovery set.
-
-#### Resume `architecture`
-
-- Require all Phase 1 artifacts to exist and be non-empty.
-- Re-check these paths before invoking the architect:
-  - `outputs/aws-migration-artifacts/aws-inventory.json`
-  - `outputs/aws-migration-artifacts/architecture-diagram.mmd`
-  - `outputs/aws-migration-artifacts/dependency-matrix.csv`
-  - `outputs/aws-migration-artifacts/migration-assessment.md`
-- If any are missing, downgrade the run to `resume discovery` and record why.
-
-#### Resume `parallel`
-
-- Require all Phase 2 artifacts to exist and be non-empty.
-- Re-check these paths before invoking any Phase 3 stream:
-  - `outputs/azure-architecture-output/design-document.md`
-  - `outputs/azure-architecture-output/architecture-diagram-azure.mmd`
-  - `outputs/azure-architecture-output/cost-comparison.md`
-  - `outputs/azure-architecture-output/service-mapping.md`
-- Inspect Phase 3a, 3b, and 3c individually:
-  - if two or three streams are incomplete, launch all incomplete streams in parallel
-  - if exactly one stream is incomplete, rerun only that stream
-  - if any stream is `❌`, repair or re-delegate only the failing stream unless the architecture artifact changed
-
-#### Resume `validation`
-
-- Require all completed Phase 3 streams to pass artifact checks.
-- If any Phase 3 artifact is missing or invalid, do not run validation; route back to the failing stream.
-- Only when 3a, 3b, and 3c all pass may Phase 4 start.
+See [steps/01-resume-from-phase.md](steps/01-resume-from-phase.md) for the full per-phase resume rules (`resume discovery`, `resume architecture`, `resume parallel`, `resume validation`).
 
 ### 5. Artifact checklist per phase
 
-A phase is not complete until every listed artifact exists, is non-empty, and meets the minimum content assertion.
-
-| Phase | Required artifact | Minimum assertion |
-|---|---|---|
-| 1 | `outputs/aws-migration-artifacts/aws-inventory.json` | Valid JSON-like content, not an empty object or empty array |
-| 1 | `outputs/aws-migration-artifacts/architecture-diagram.mmd` | Contains `graph` or `flowchart` |
-| 1 | `outputs/aws-migration-artifacts/dependency-matrix.csv` | At least a header row plus one dependency row |
-| 1 | `outputs/aws-migration-artifacts/migration-assessment.md` | Contains at least one `##` heading and migration findings |
-| 2 | `outputs/azure-architecture-output/design-document.md` | Contains all 11 required section headings |
-| 2 | `outputs/azure-architecture-output/architecture-diagram-azure.mmd` | Contains Mermaid graph syntax plus at least one `subgraph` |
-| 2 | `outputs/azure-architecture-output/cost-comparison.md` | Contains a monthly summary table and break-even section |
-| 2 | `outputs/azure-architecture-output/service-mapping.md` | Contains AWS and Azure mapping columns |
-| 3a | `outputs/bicep-templates/main.bicep` | References modules and builds logically from Section 5 |
-| 3a | `outputs/bicep-templates/modules/*.bicep` | At least one module file exists and is non-empty |
-| 3a | `outputs/bicep-templates/parameters/dev.bicepparam` | References `../main.bicep` or `main.bicep` |
-| 3b | `outputs/azure-functions/function_app.py` | Contains Azure Functions app definition |
-| 3b | `outputs/azure-functions/requirements.txt` | Lists `azure-functions` and needed Azure SDK packages |
-| 3b | `outputs/azure-functions/host.json` | Non-empty JSON configuration |
-| 3c | `.github/workflows/*.yml` or `.github/workflows/*.yaml` | At least one workflow file exists |
-| 3c | one workflow file with `infra` or `deploy` in the file name | Contains Azure login and deployment steps |
-| 4 | `outputs/validation-report.md` | Starts with `## Status: PASSED` or `## Status: FAILED` |
+See [references/artifact-checklist.md](references/artifact-checklist.md) for the required artifact and minimum-content assertion per phase. A phase is not complete until every listed artifact passes.
 
 ### 6. Decision tree: invoke Phase 3 in parallel or serial
 
-Use this decision tree every time Phase 3 is reached or resumed:
-
-```text
-Have Phase 2 artifacts passed verification?
-├─ No  → Stop. Fix or rerun Phase 2.
-└─ Yes
-   ↓
-How many of 3a, 3b, 3c are not yet ✅?
-├─ 3 incomplete → Launch 3a + 3b + 3c in one batched parallel block.
-├─ 2 incomplete → Launch the two incomplete streams in parallel.
-├─ 1 incomplete → Run only the remaining stream serially.
-└─ 0 incomplete → Do not rerun Phase 3; proceed to Phase 4.
-```
-
-Additional rules:
-
-- `full` runs from the start always launch all three Phase 3 streams together.
-- `resume parallel` launches only the incomplete streams, but still launches them together when more than one remains.
-- `phase 3a`, `phase 3b`, or `phase 3c` isolation requests are allowed to run serially because the user explicitly asked for a single stream.
-- Verification can happen serially after the parallel launch completes, but invocation should not be artificially serialized when more than one stream remains.
+See [steps/02-phase3-parallel-decision.md](steps/02-phase3-parallel-decision.md).
 
 ### 7. Phase 4 — Validation Repair Loop (MAX_VALIDATION_ITERATIONS = 3)
 
-Phase 4 is a self-healing loop — never mark ❌ on the first failure without attempting repair.
-
-#### Failure Categorization Table
-
-Every failing check from `outputs/validation-report.md` is assigned one category:
-
-| Category | Signal | Auto-fixable? |
-|---|---|---|
-| A — Bicep/IaC | Wrong property, missing resource, security config not applied, wrong SKU | Yes — @iac-transformation |
-| B — Skill/Agent | Failure pre-deploy evals should have caught (eval gap), or agent produced insecure config | Yes — @skill-evolution-engine + new eval check |
-| C — Environment | Quota, region capacity, Azure Policy, PE approval pending, RBAC propagation | No — human intervention |
-
-A failure can be both A and B. Fix the Bicep (A) AND update the skill and add an eval check (B).
-
-#### Loop Procedure (for each iteration V = 1…3)
-
-**Step 4.V.1** — Invoke @deployment-validation.
-
-**Step 4.V.2** — Read `outputs/validation-report.md`.
-- `PASSED` → ✅ done.
-- `FAILED` → categorize all failures per the table above.
-
-**Step 4.V.3** — If any Category C failure: mark Phase 4 ❌ `"Human intervention required"`, stop.
-
-**Step 4.V.4** — Apply fixes (Category B first, then A):
-
-Category B → @skill-evolution-engine:
-```
-Fix the skill/agent that caused or failed to catch: <failures>
-Add new eval check to evals/checks/ + fixture to evals/fixtures/ + entry to evals/evals-dataset.json
-```
-
-Category A → @iac-transformation:
-```
-Fix Bicep for: <failures>. Targeted fixes only. Write to outputs/bicep-templates/
-```
-
-**Step 4.V.5** — EVAL GATE (blocks re-deploy):
-
-Run: `python3 -m evals.run_evals --report evals/evals-report.json`
-
-- ≥ 90% → proceed to re-deploy.
-- < 90% → fix the failing checks, re-run evals once more. If still < 90% → mark ❌, stop.
-
-**Step 4.V.6** — Re-deploy: re-enter Phase 3 IaC-Deploy loop (counter continues, does not reset). After Phase 3 exits ✅: increment V, return to Step 4.V.1.
-
-**Step 4.V.7** — MAX_ITERATIONS reached: mark ❌, write full report to `outputs/migration-task-plan.md`, stop.
-
-#### Mitigation 1 — Fixture verification after eval code generation
-
-When @skill-evolution-engine writes a new eval check (Python code), the PM MUST immediately run:
-
-```bash
-python3 -m evals.run_evals --fixture
-```
-
-If fixture self-test exits non-zero (exit code 2), the new check is buggy. Invoke @skill-evolution-engine again to fix the check before proceeding.
-
-**NEVER trust an LLM-generated eval check without running `--fixture`.**
-
-#### Mitigation 2 — Category C misclassification guard
-
-If the **same failure message** appears in two consecutive validation iterations unchanged, reclassify it as Category C regardless of initial classification. Add to Blockers:
-
-```
-Same failure persisted across 2 iterations — likely environment issue requiring human intervention.
-```
-
-Stop the Phase 4 loop immediately.
-
-#### Mitigation 3 — Combined iteration counter
-
-Write the combined Phase 3+4 total iteration count explicitly to `outputs/migration-task-plan.md` as a running number (not reconstructed from any log file).
-
-Format in task plan:
-```
-Total deploy attempts (Phase 3+4): N
-```
-
-Update this after every Phase 3 iteration AND every Phase 4 re-deploy. Use this number for `MAX_ITERATIONS` checks, not a reconstructed count from a log.
-
----
+See [steps/03-phase4-validation-loop.md](steps/03-phase4-validation-loop.md) for the full self-healing loop, failure categorization table, and iteration mitigations.
 
 ### 8. Verification workflow after each phase
 
-1. Read the worker response for claimed output paths.
-2. Ignore the success claim until the artifacts are opened and checked.
-3. Verify file existence first.
-4. Verify non-empty content second.
-5. Verify minimum content assertions third.
-6. Update `outputs/migration-task-plan.md` only after the checks pass.
-7. If any check fails, add a blocker entry immediately.
+See [steps/04-verification-workflow.md](steps/04-verification-workflow.md).
 
-### 9. Error escalation runbook
+### 9. Error escalation runbook and edge cases
 
-Use this runbook to keep failures consistent and recoverable:
+See [references/error-escalation-runbook.md](references/error-escalation-runbook.md) for the severity table, blocker format, and known edge cases (stale success rows, partial Phase 3 completion, architecture drift, concurrent writes).
 
-| Severity | Trigger | Required response |
-|---|---|---|
-| Level 1 — Missing file | Expected artifact path does not exist | Re-read the phase prompt, re-delegate once with the missing file list, keep phase `🔄` during retry |
-| Level 2 — Empty or malformed file | File exists but is empty, whitespace-only, or lacks required headings/content | Mark the phase `❌`, record the exact failing assertion, then re-delegate only if the defect is repairable without changing upstream design |
-| Level 3 — Upstream/downstream mismatch | Phase output contradicts a prerequisite artifact, for example Bicep modules not present in Section 5 | Mark the current phase `❌`, add a blocker naming the conflicting upstream source, stop and route back to the prerequisite phase owner |
-| Level 4 — External dependency failure | Credentials, MCP servers, required tooling, or repository permissions unavailable | Mark the phase `❌`, note the external dependency in `## Blockers`, stop and surface the unblock action |
-
-**Blocker format:**
-
-```markdown
-- Phase <phase-id> (<owner>): <what failed> — <exact unblock action>
-```
-
-### 9. Edge Cases / Failure Modes
-
-- **Stale success row:** `migration-task-plan.md` says `✅`, but the file was deleted later. Treat the artifact as authoritative and downgrade the row to `❌`.
-- **Partial Phase 3 completion:** One Phase 3 stream is `✅`, another `🔄`, another `❌`. Re-run only the failing or incomplete streams unless Phase 2 changed.
-- **Architecture drift after Phase 2:** If `design-document.md` is rewritten, re-check whether existing Phase 3 artifacts still align before accepting them.
-- **Concurrent worker writes:** Always re-read the plan immediately before editing. Do not overwrite other phase rows.
-- **Whitespace-only output:** A file containing just a heading or comment still fails the minimum-content rule.
-- **Ambiguous resume point:** If multiple earlier phases are incomplete or invalid, resume from the earliest invalid prerequisite.
+---
 
 ## Rules
 

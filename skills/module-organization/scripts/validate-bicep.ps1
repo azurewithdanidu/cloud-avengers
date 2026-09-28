@@ -1,24 +1,34 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-    Validates all Bicep files under a directory and runs az deployment group what-if
-    for every environment parameter file found.
+    Validates every grouped Bicep orchestrator file (main.*.bicep) under a directory and
+    runs az deployment sub what-if for every matching environment/group parameter file.
 
 .DESCRIPTION
     Performs these checks in order:
-      1. az bicep build   — syntax validation on every *.bicep file
-      2. az bicep restore — pull AVM module cache (required before building)
-      3. az deployment group what-if — incremental dry-run for each *.bicepparam
-         (requires ResourceGroup and Subscription to be set)
+      1. az bicep restore — pull AVM module cache for every main.*.bicep (required before building)
+      2. az bicep build   — syntax validation on every main.*.bicep file
+      3. az deployment sub what-if — subscription-scope dry-run for each
+         parameters/<Environment>/<group>.bicepparam file, matched to its main.<group>.bicep
+         (requires Location; ResourceGroup is only used to scope the blocking-delete check)
+
+    There is no single main.bicep — every group (main.networking.bicep, main.security.bicep,
+    main.data.bicep, main.monitoring.bicep, main.messaging.bicep, main.compute.bicep, or
+    whatever groups the workload uses) is validated independently.
 
     Exits 0 only when all checks pass.  Any failure exits 1.
 
 .PARAMETER BicepRoot
-    Path to the Bicep root folder containing main.bicep. Defaults to
+    Path to the Bicep root folder containing the main.*.bicep group files. Defaults to
     "outputs/bicep-templates" (relative to the repo root).
 
-.PARAMETER ResourceGroup
-    Azure resource group name for what-if runs. If omitted, what-if is skipped.
+.PARAMETER Environment
+    Environment folder under parameters/ to run what-if against (dev | staging | prod).
+    If omitted, what-if is skipped and only syntax validation runs.
+
+.PARAMETER Location
+    Azure region for the subscription-scope what-if calls (e.g. australiaeast). Required
+    when -Environment is supplied.
 
 .PARAMETER Subscription
     Azure subscription ID. If omitted, uses the current az account.
@@ -28,14 +38,15 @@
     .\validate-bicep.ps1
 
 .EXAMPLE
-    # Full validation including what-if dry runs
-    .\validate-bicep.ps1 -ResourceGroup "rg-dev-migration" -Subscription "00000000-0000-0000-0000-000000000000"
+    # Full validation including what-if dry runs for every group in dev
+    .\validate-bicep.ps1 -Environment dev -Location australiaeast -Subscription "00000000-0000-0000-0000-000000000000"
 #>
 
 [CmdletBinding()]
 param (
     [string]$BicepRoot     = 'outputs/bicep-templates',
-    [string]$ResourceGroup = '',
+    [string]$Environment   = '',
+    [string]$Location      = '',
     [string]$Subscription  = ''
 )
 
@@ -46,56 +57,69 @@ function Write-Step  { param([string]$Msg) Write-Host "`n==> $Msg" -ForegroundCo
 function Write-Pass  { param([string]$Msg) Write-Host "  [PASS] $Msg" -ForegroundColor Green }
 function Write-Fail  { param([string]$Msg) Write-Host "  [FAIL] $Msg" -ForegroundColor Red; $Script:errors++ }
 
-# ── Step 1: Restore AVM modules ────────────────────────────────────────────────
-$mainBicep = Join-Path $BicepRoot 'main.bicep'
-if (-not (Test-Path $mainBicep)) {
-    Write-Error "main.bicep not found at '$mainBicep'. Adjust -BicepRoot."
+# ── Step 1: Discover group files ───────────────────────────────────────────────
+$groupFiles = Get-ChildItem -Path $BicepRoot -Filter 'main.*.bicep' -ErrorAction SilentlyContinue
+if (-not $groupFiles) {
+    Write-Error "No main.*.bicep group files found under '$BicepRoot'. Adjust -BicepRoot."
     exit 1
 }
 
-Write-Step "Restoring AVM module cache"
-az bicep restore --file $mainBicep --force
-if ($LASTEXITCODE -ne 0) { Write-Fail "az bicep restore failed"; exit 1 }
-else { Write-Pass "az bicep restore" }
+# ── Step 2: Restore AVM modules for every group file ──────────────────────────
+Write-Step "Restoring AVM module cache for $($groupFiles.Count) group file(s)"
+foreach ($gf in $groupFiles) {
+    az bicep restore --file $gf.FullName --force
+    if ($LASTEXITCODE -ne 0) { Write-Fail "az bicep restore failed for $($gf.Name)" }
+    else { Write-Pass "az bicep restore — $($gf.Name)" }
+}
 
-# ── Step 2: Build (syntax-check) every .bicep file ────────────────────────────
-Write-Step "Building (syntax-checking) all Bicep files under $BicepRoot"
-Get-ChildItem -Path $BicepRoot -Recurse -Filter '*.bicep' | ForEach-Object {
-    $file = $_.FullName
-    $result = az bicep build --file $file 2>&1
+# ── Step 3: Build (syntax-check) every group file ─────────────────────────────
+Write-Step "Building (syntax-checking) every main.*.bicep group file"
+foreach ($gf in $groupFiles) {
+    $result = az bicep build --file $gf.FullName 2>&1
     if ($LASTEXITCODE -ne 0) {
-        Write-Fail "$($_.Name)`n$result"
+        Write-Fail "$($gf.Name)`n$result"
     } else {
-        Write-Pass $_.Name
+        Write-Pass $gf.Name
     }
 }
 
-# ── Step 3: What-if for each parameter file ───────────────────────────────────
-if ($ResourceGroup) {
-    $paramsDir = Join-Path $BicepRoot 'parameters'
+# ── Step 4: What-if for each group's parameter file in the target environment ─
+if ($Environment) {
+    if (-not $Location) {
+        Write-Error "-Location is required when -Environment is supplied (subscription-scope what-if)."
+        exit 1
+    }
+
+    $paramsDir = Join-Path $BicepRoot "parameters/$Environment"
     $paramFiles = Get-ChildItem -Path $paramsDir -Filter '*.bicepparam' -ErrorAction SilentlyContinue
 
     if (-not $paramFiles) {
         Write-Host "  No .bicepparam files found under $paramsDir — skipping what-if" -ForegroundColor Yellow
     } else {
-        Write-Step "Running what-if for each parameter file"
+        Write-Step "Running subscription-scope what-if for each group in '$Environment'"
 
         $subArgs = if ($Subscription) { @('--subscription', $Subscription) } else { @() }
 
         foreach ($pf in $paramFiles) {
-            $env = $pf.BaseName   # dev | staging | prod
-            Write-Host "  what-if: $env ..." -NoNewline
+            $group = $pf.BaseName   # networking | security | data | monitoring | messaging | compute
+            $groupBicep = Join-Path $BicepRoot "main.$group.bicep"
 
-            $whatifJson = az deployment group what-if `
-                --resource-group $ResourceGroup `
-                --template-file $mainBicep `
+            if (-not (Test-Path $groupBicep)) {
+                Write-Fail "$group — no matching main.$group.bicep found for parameters/$Environment/$($pf.Name)"
+                continue
+            }
+
+            Write-Host "  what-if: $group ..." -NoNewline
+
+            $whatifJson = az deployment sub what-if `
+                --location $Location `
+                --template-file $groupBicep `
                 --parameters $pf.FullName `
-                --mode Incremental `
                 --output json `
                 @subArgs 2>&1
 
             if ($LASTEXITCODE -ne 0) {
-                Write-Fail "what-if failed for $env`n$whatifJson"
+                Write-Fail "what-if failed for $group`n$whatifJson"
                 continue
             }
 
@@ -107,10 +131,10 @@ if ($ResourceGroup) {
                     $_.resourceId -match 'storageAccounts|vaults|servers|namespaces|databaseAccounts'
                 }
                 if ($blocking) {
-                    Write-Fail "$env — BLOCKING DELETE on data resource(s):"
+                    Write-Fail "$group — BLOCKING DELETE on data resource(s):"
                     $blocking | ForEach-Object { Write-Host "      DELETE: $($_.resourceId)" -ForegroundColor Red }
                 } else {
-                    Write-Pass "$env — no blocking changes"
+                    Write-Pass "$group — no blocking changes"
                 }
             } catch {
                 Write-Host " (could not parse JSON — review manually)" -ForegroundColor Yellow
@@ -118,7 +142,7 @@ if ($ResourceGroup) {
         }
     }
 } else {
-    Write-Host "`n  -ResourceGroup not supplied — skipping what-if dry runs" -ForegroundColor Yellow
+    Write-Host "`n  -Environment not supplied — skipping what-if dry runs" -ForegroundColor Yellow
 }
 
 # ── Result ────────────────────────────────────────────────────────────────────
@@ -128,3 +152,4 @@ if ($errors -gt 0) {
     exit 1
 }
 Write-Host "RESULT: All Bicep validation checks PASSED" -ForegroundColor Green
+

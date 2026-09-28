@@ -30,8 +30,8 @@ Read each skill before performing the associated task.
 
 | Task | Skill |
 |---|---|
-| Organising Bicep into modules (networking/storage/security/compute/messaging/monitoring) | `skills/module-organization/SKILL.md` |
-| Creating dev/staging/prod `.bicepparam` files with correct SKU and replication rules | `skills/parameter-management/SKILL.md` |
+| Assigning resources to grouped orchestrator files (main.networking/security/data/monitoring/messaging/compute.bicep) — no local module files | `skills/module-organization/SKILL.md` |
+| Creating dev/staging/prod `.bicepparam` files per group with correct SKU and replication rules | `skills/parameter-management/SKILL.md` |
 | Bicep naming conventions, parameter decorators, and required outputs | `skills/bicep-generation/SKILL.md` |
 | Private endpoints, NSGs, Key Vault hardening | `skills/azure-security-patterns/SKILL.md` |
 | System-assigned Managed Identity and RBAC role assignments in Bicep | `skills/azure-auth-patterns/SKILL.md` |
@@ -49,6 +49,7 @@ Follow the `task-tracking` skill: `skills/task-tracking/SKILL.md`
  - Use AVM (Azure Verified Modules) from the public Bicep registry (`br/public:avm/...`) for **every** Azure resource — do **NOT** create or copy local module files.
  - Reference modules directly via `br/public:avm/res/<provider>/<type>:<version>` (or `br/public:avm/ptn/...` for pattern modules). Never vendor or copy module source into the repo.
  - Use service-mapping.md from azure-architecture-output/ to understand which AWS services map to which Azure services and number of service.
+ - **No single `main.bicep`.** Every resource is assigned to one of the grouped, subscription-scoped orchestrator files (`main.networking.bicep`, `main.security.bicep`, `main.data.bicep`, `main.monitoring.bicep`, `main.messaging.bicep`, `main.compute.bicep`, or an adjusted set justified in `outputs/bicep-templates/README.md`) per the `module-organization` skill.
 
 
 # Target Location 
@@ -60,8 +61,8 @@ Follow the `task-tracking` skill: `skills/task-tracking/SKILL.md`
 1. Analyze azure-architecture-summary.md for required resources
 2. Map AWS resources to Azure equivalents using service-mapping.md
 3. Resolve AVM module paths and versions (via `module-organization` skill — do NOT copy or vendor local modules)
-4. Write Bicep templates referencing AVM modules via `br/public:avm/...`
-5. Update Buildkite pipeline for Azure
+4. Assign each resource to a group and write `main.<group>.bicep` files referencing AVM modules via `br/public:avm/...` directly (no local wrapper files); use `existing` resource lookups for cross-group references
+5. Update Buildkite pipeline for Azure — one validate/what-if/deploy stage sequence per group file, in dependency order
 6. Create deployment validation scripts
 
 
@@ -127,44 +128,73 @@ steps:
       queue: test-agents
 ```
 
-**After (Azure Bicep Deployment)**
+**After (Azure Bicep Deployment)** — one validate/what-if/deploy sequence per group file, in dependency order (this example shows `networking` and `compute`; repeat per group):
 ```yaml
 steps:
   - label: "Validate Bicep"
     commands:
-      - az bicep build --file main.bicep
-      - az bicep build --file modules/networking.bicep
-      - az bicep build --file modules/compute.bicep
+      - az bicep build --file main.networking.bicep
+      - az bicep build --file main.security.bicep
+      - az bicep build --file main.data.bicep
+      - az bicep build --file main.monitoring.bicep
+      - az bicep build --file main.messaging.bicep
+      - az bicep build --file main.compute.bicep
     agents:
       queue: default
 
   - wait
 
-  - label: "Generate What-If"
+  - label: "What-If — networking"
     commands:
-      - az deployment group what-if \
-          --name bicep-whatif-staging \
-          --resource-group rg-staging \
-          --template-file main.bicep \
-          --parameters parameters/staging.bicepparam \
-          --mode Incremental
+      - az deployment sub what-if \
+          --name bicep-whatif-networking-staging \
+          --location australiaeast \
+          --template-file main.networking.bicep \
+          --parameters parameters/staging/networking.bicepparam
     agents:
       queue: default
 
   - wait
 
-  - label: "Deploy to Staging"
+  - label: "Deploy — networking"
     commands:
-      - az deployment group create \
-          --name bicep-deployment-staging \
-          --resource-group rg-staging \
-          --template-file main.bicep \
-          --parameters parameters/staging.bicepparam
+      - az deployment sub create \
+          --name bicep-deploy-networking-staging \
+          --location australiaeast \
+          --template-file main.networking.bicep \
+          --parameters parameters/staging/networking.bicepparam
     agents:
       queue: default
     env:
       AZURE_SUBSCRIPTION_ID: ${AZURE_SUBSCRIPTION_ID}
-      AZURE_RESOURCE_GROUP: rg-staging
+
+  - wait
+
+  # ... repeat What-If + Deploy stages for security, data, monitoring, messaging ...
+
+  - label: "What-If — compute"
+    commands:
+      - az deployment sub what-if \
+          --name bicep-whatif-compute-staging \
+          --location australiaeast \
+          --template-file main.compute.bicep \
+          --parameters parameters/staging/compute.bicepparam
+    agents:
+      queue: default
+
+  - wait
+
+  - label: "Deploy — compute"
+    commands:
+      - az deployment sub create \
+          --name bicep-deploy-compute-staging \
+          --location australiaeast \
+          --template-file main.compute.bicep \
+          --parameters parameters/staging/compute.bicepparam
+    agents:
+      queue: default
+    env:
+      AZURE_SUBSCRIPTION_ID: ${AZURE_SUBSCRIPTION_ID}
 
   - wait
 
@@ -178,16 +208,16 @@ steps:
 ### Key Changes in Pipeline
 
 1. **Validation:**
-   - `aws cloudformation validate-template` → `az bicep build`
+   - `aws cloudformation validate-template` → `az bicep build` (once per group file)
 
 2. **Deployment Planning:**
-   - Add `az deployment group what-if` for preview before deploy
+   - Add `az deployment sub what-if` for preview before deploy (subscription scope — every group file creates the resource group itself)
 
 3. **Deployment:**
-   - `aws cloudformation deploy` → `az deployment group create`
+   - `aws cloudformation deploy` → `az deployment sub create` (once per group file, in dependency order)
 
 4. **Parameters:**
-   - CloudFormation overrides → Bicep parameter files
+   - CloudFormation overrides → per-group Bicep parameter files (`parameters/<env>/<group>.bicepparam`)
 
 5. **Authentication:**
    - AWS credentials → Azure credentials (via Buildkite service principal)
@@ -198,28 +228,32 @@ steps:
 
 ```bash
 #!/bin/bash
-# Pre-deployment validation
+# Pre-deployment validation — run once per group file
 
-echo "=== Validating Bicep Templates ==="
-az bicep build --file main.bicep
-if [ $? -ne 0 ]; then
-  echo "Bicep validation failed"
-  exit 1
-fi
+for GROUP in networking security data monitoring messaging compute; do
+  MAIN_BICEP="main.${GROUP}.bicep"
+  [ -f "$MAIN_BICEP" ] || continue
 
-echo "=== Running What-If Check ==="
-az deployment group what-if \
-  --resource-group $AZURE_RESOURCE_GROUP \
-  --template-file main.bicep \
-  --parameters $PARAM_FILE \
-  --mode Incremental \
-  > /tmp/whatif-results.txt
+  echo "=== Validating $MAIN_BICEP ==="
+  az bicep build --file "$MAIN_BICEP"
+  if [ $? -ne 0 ]; then
+    echo "Bicep validation failed for $GROUP"
+    exit 1
+  fi
 
-# Analyze what-if output
-if grep -q "Deny" /tmp/whatif-results.txt; then
-  echo "WARNING: Policy violations detected"
-  exit 1
-fi
+  echo "=== Running What-If Check ($GROUP) ==="
+  az deployment sub what-if \
+    --location "$AZURE_LOCATION" \
+    --template-file "$MAIN_BICEP" \
+    --parameters "parameters/${ENVIRONMENT}/${GROUP}.bicepparam" \
+    > "/tmp/whatif-${GROUP}-results.txt"
+
+  # Analyze what-if output
+  if grep -q "Deny" "/tmp/whatif-${GROUP}-results.txt"; then
+    echo "WARNING: Policy violations detected for $GROUP"
+    exit 1
+  fi
+done
 
 echo "=== Validation Passed ==="
 ```
@@ -228,29 +262,34 @@ echo "=== Validation Passed ==="
 
 ```bash
 #!/bin/bash
-# Deploy with validation
+# Deploy with validation — one group file at a time, in dependency order
 
-DEPLOYMENT_NAME="bicep-deploy-$(date +%s)"
-RESOURCE_GROUP=$1
-PARAM_FILE=$2
+ENVIRONMENT=$1
+LOCATION=$2
 
-echo "Deploying to $RESOURCE_GROUP..."
+for GROUP in networking security data monitoring messaging compute; do
+  MAIN_BICEP="main.${GROUP}.bicep"
+  PARAM_FILE="parameters/${ENVIRONMENT}/${GROUP}.bicepparam"
+  [ -f "$MAIN_BICEP" ] || continue
 
-az deployment group create \
-  --name $DEPLOYMENT_NAME \
-  --resource-group $RESOURCE_GROUP \
-  --template-file main.bicep \
-  --parameters $PARAM_FILE \
-  --mode Incremental
+  DEPLOYMENT_NAME="bicep-deploy-${GROUP}-$(date +%s)"
+  echo "Deploying $GROUP to environment $ENVIRONMENT..."
 
-if [ $? -eq 0 ]; then
-  echo "Deployment successful: $DEPLOYMENT_NAME"
-  # Store deployment ID for rollback
-  echo $DEPLOYMENT_NAME > /tmp/latest-deployment.txt
-else
-  echo "Deployment failed"
-  exit 1
-fi
+  az deployment sub create \
+    --name "$DEPLOYMENT_NAME" \
+    --location "$LOCATION" \
+    --template-file "$MAIN_BICEP" \
+    --parameters "$PARAM_FILE"
+
+  if [ $? -eq 0 ]; then
+    echo "Deployment successful: $DEPLOYMENT_NAME"
+    # Store deployment ID for rollback, keyed by group
+    echo "$DEPLOYMENT_NAME" > "/tmp/latest-deployment-${GROUP}.txt"
+  else
+    echo "Deployment failed for $GROUP — stopping (later groups may depend on it)"
+    exit 1
+  fi
+done
 ```
 
 ## Rollback Procedures
@@ -259,42 +298,39 @@ fi
 
 ```bash
 #!/bin/bash
-# Rollback to previous deployment
+# Rollback a single group to its previous deployment
 
-RESOURCE_GROUP=$1
+GROUP=$1   # networking | security | data | monitoring | messaging | compute
 
-# Get previous successful deployment
-PREVIOUS=$(az deployment group list \
-  --resource-group $RESOURCE_GROUP \
-  --query '[].name' \
+# Get previous successful deployment for this group (subscription-scope deployments)
+PREVIOUS=$(az deployment sub list \
+  --query "[?starts_with(name, 'bicep-deploy-${GROUP}-')].name" \
   --sort-by '@.properties.timestamp' \
   -o tsv | tail -2 | head -1)
 
 if [ -z "$PREVIOUS" ]; then
-  echo "No previous deployment found"
+  echo "No previous deployment found for $GROUP"
   exit 1
 fi
 
-echo "Rolling back to deployment: $PREVIOUS"
+echo "Rolling back $GROUP to deployment: $PREVIOUS"
 
 # Get template from previous deployment
-TEMPLATE=$(az deployment group show \
-  --name $PREVIOUS \
-  --resource-group $RESOURCE_GROUP \
+TEMPLATE=$(az deployment sub show \
+  --name "$PREVIOUS" \
   --query properties.template \
   -o json)
 
 # Re-deploy previous template
-az deployment group create \
-  --name "rollback-$(date +%s)" \
-  --resource-group $RESOURCE_GROUP \
-  --template-spec "$TEMPLATE" \
-  --mode Incremental
+az deployment sub create \
+  --name "rollback-${GROUP}-$(date +%s)" \
+  --location "$AZURE_LOCATION" \
+  --template-spec "$TEMPLATE"
 
 if [ $? -eq 0 ]; then
-  echo "Rollback successful"
+  echo "Rollback successful for $GROUP"
 else
-  echo "Rollback failed - manual intervention required"
+  echo "Rollback failed for $GROUP - manual intervention required"
   exit 1
 fi
 ```
@@ -302,8 +338,8 @@ fi
 ## Output Files
 
 ### 1. Converted Bicep Templates
-- `main.bicep` - Main deployment file
-- All resources referenced via `br/public:avm/res/...` or `br/public:avm/ptn/...` module declarations — **no local module files**
+- `main.networking.bicep`, `main.security.bicep`, `main.data.bicep`, `main.monitoring.bicep`, `main.messaging.bicep`, `main.compute.bicep` (or an adjusted, justified group set) — each a subscription-scoped orchestrator, no root `main.bicep`
+- All resources referenced via `br/public:avm/res/...` or `br/public:avm/ptn/...` module declarations, called directly — **no local module files**
 - `bicepconfig.json` with `modulePath: "bicep"` to enable AVM restore
 
 ### 3. Updated CI/CD Pipeline

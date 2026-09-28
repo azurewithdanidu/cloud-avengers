@@ -29,7 +29,10 @@ When implementing the workflows specified in `design-document.md` Section 11.
 4. Pin all action versions explicitly.
 5. Write all files under `.github/workflows/`.
 
-**IaC deployment workflow pattern:**
+**IaC deployment workflow pattern** — there is no single `main.bicep`: deploy every grouped
+orchestrator file (`main.networking.bicep`, `main.security.bicep`, `main.data.bicep`,
+`main.monitoring.bicep`, `main.messaging.bicep`, `main.compute.bicep`, or whichever groups the
+workload uses) in dependency order, each with subscription-scope commands:
 
 ```yaml
 name: Deploy Infrastructure
@@ -65,33 +68,43 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Validate Bicep
-        run: az bicep build --file outputs/bicep-templates/main.bicep
-
-      - name: What-If Check
+      - name: Validate Bicep (every group file)
         run: |
-          az deployment group what-if \
-            --resource-group ${{ vars.RESOURCE_GROUP_NAME }} \
-            --template-file outputs/bicep-templates/main.bicep \
-            --parameters outputs/bicep-templates/parameters/${{ github.event.inputs.environment || 'staging' }}.bicepparam \
-            --mode Incremental
+          for f in outputs/bicep-templates/main.*.bicep; do
+            az bicep build --file "$f"
+          done
 
-      - name: Deploy
+      - name: Deploy every group, in dependency order
         id: deploy
+        env:
+          ENVIRONMENT: ${{ github.event.inputs.environment || 'staging' }}
         run: |
-          az deployment group create \
-            --name "deploy-${{ github.run_id }}" \
-            --resource-group ${{ vars.RESOURCE_GROUP_NAME }} \
-            --template-file outputs/bicep-templates/main.bicep \
-            --parameters outputs/bicep-templates/parameters/${{ github.event.inputs.environment || 'staging' }}.bicepparam \
-            --mode Incremental
+          set -e
+          for GROUP in networking security data monitoring messaging compute; do
+            MAIN_BICEP="outputs/bicep-templates/main.${GROUP}.bicep"
+            PARAM_FILE="outputs/bicep-templates/parameters/${ENVIRONMENT}/${GROUP}.bicepparam"
+            [ -f "$MAIN_BICEP" ] || continue
+
+            echo "=== What-If: $GROUP ==="
+            az deployment sub what-if \
+              --location ${{ vars.LOCATION }} \
+              --template-file "$MAIN_BICEP" \
+              --parameters "$PARAM_FILE"
+
+            echo "=== Deploy: $GROUP ==="
+            az deployment sub create \
+              --name "deploy-${GROUP}-${{ github.run_id }}" \
+              --location ${{ vars.LOCATION }} \
+              --template-file "$MAIN_BICEP" \
+              --parameters "$PARAM_FILE"
+          done
 
       - name: Rollback on failure
         if: failure() && steps.deploy.outcome == 'failure'
         run: |
-          az deployment group cancel \
-            --name "deploy-${{ github.run_id }}" \
-            --resource-group ${{ vars.RESOURCE_GROUP_NAME }} || true
+          # Cancel whichever group's deployment was in flight — name matches deploy-<group>-<run-id>
+          az deployment sub list --query "[?starts_with(name, 'deploy-') && contains(name, '${{ github.run_id }}')].name" -o tsv | \
+            xargs -I{} az deployment sub cancel --name {} || true
 ```
 
 **Azure Functions deployment workflow pattern:**
@@ -153,7 +166,8 @@ jobs:
 - **Always set `permissions: id-token: write`** — without this, OIDC token is not issued.
 - **Always pin action versions** — `actions/checkout@v4` not `@latest`. Never use a moving tag.
 - **Never put environment-specific values in workflow YAML** — always `${{ secrets.X }}` or `${{ vars.X }}`.
-- **Always include a what-if step before any `az deployment group create`** — never deploy without preview.
+- **Always include a what-if step before any `az deployment sub create`** — never deploy without preview.
+- **Deploy every `main.<group>.bicep` in dependency order** (networking → security → data → monitoring → messaging → compute) — never in parallel, and stop the job if an earlier group fails.
 - **Always include a rollback step** using `if: failure()` — the step should attempt to cancel the in-flight deployment.
 - **Never use `continue-on-error: true`** on deployment steps — fail fast.
 
@@ -200,32 +214,4 @@ jobs:
 - **Tag every deployment with `github.run_id`** — this makes it easy to correlate a deployment failure in Azure with the specific GitHub Actions run that caused it.
 - **Rollback is not automatic rollback:** `az functionapp deployment slot swap` reverts app code but not infrastructure. If Bicep changes were part of the same deployment, a separate template rollback is needed.
 - **SWA deployment token rotation:** The Static Web Apps deployment token does not expire but should be rotated if a team member with access leaves. Regenerate from the Azure portal and update the GitHub secret.
-
----
-
-## Runtime Detection
-
-This skill supports both Bash and PowerShell. Use the following detection order:
-
-| Priority | Runtime | Condition | Script |
-|---|---|---|---|
-| 1 (preferred) | Bash | `curl` and `jq` available on PATH | `scripts/<name>.sh` |
-| 2 | PowerShell 7+ | `pwsh` available on PATH | `scripts/<name>.ps1` |
-| 3 (fallback) | Windows PowerShell 5.1 | `powershell.exe` available | `scripts/<name>.ps1 -ExecutionPolicy RemoteSigned` |
-
-**Detection snippet (Bash):**
-```bash
-if command -v curl &>/dev/null && command -v jq &>/dev/null; then
-  bash scripts/<name>.sh [args]
-elif command -v pwsh &>/dev/null; then
-  pwsh -File scripts/<name>.ps1 [args]
-elif command -v powershell.exe &>/dev/null; then
-  powershell.exe -ExecutionPolicy RemoteSigned -File scripts/<name>.ps1 [args]
-else
-  echo "ERROR: Requires curl+jq (Bash) or PowerShell 7+ (pwsh)"
-  exit 1
-fi
-```
-
-**Parameter naming convention:** Bash uses `--kebab-case`; PowerShell uses `-PascalCase`. Both produce identical output.
 

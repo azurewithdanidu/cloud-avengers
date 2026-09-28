@@ -26,7 +26,7 @@ Read each skill before performing the associated task.
 
 | Task | Skill |
 |---|---|
-| Running `az deployment group what-if`, interpreting results, blocking on destructive changes | `skills/what-if-validation/SKILL.md` |
+| Running `az deployment sub what-if` for every grouped orchestrator file, interpreting results, blocking on destructive changes | `skills/what-if-validation/SKILL.md` |
 | HTTP endpoint checks, Managed Identity verification, Key Vault resolution, end-to-end blob test | `skills/smoke-testing/SKILL.md` |
 | Security pattern verification (private endpoints, NSGs, Key Vault hardening) | `skills/azure-security-patterns/SKILL.md` |
 | Updating `outputs/migration-task-plan.md` status | `skills/task-tracking/SKILL.md` |

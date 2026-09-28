@@ -1,37 +1,41 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-    Runs full pre-deployment validation: Bicep syntax, ARM validation,
-    what-if dry-run, policy compliance, and quota checks.
+    Runs full pre-deployment validation for every grouped Bicep orchestrator file
+    (main.<group>.bicep): syntax, ARM validation, what-if dry-run, policy
+    compliance, and quota checks.
 
 .DESCRIPTION
-    Automatically detects whether main.bicep is subscription-scoped or
-    resource-group-scoped and uses the appropriate deployment commands.
+    There is no single main.bicep — every main.<group>.bicep discovered under
+    -BicepRoot (main.networking.bicep, main.security.bicep, main.data.bicep,
+    main.monitoring.bicep, main.messaging.bicep, main.compute.bicep, or whatever
+    groups the workload uses) is validated independently, in the order the
+    module-organization skill specifies (networking → security → data →
+    monitoring → messaging → compute).
 
-    Gate order (stops on first blocking failure):
+    Gate order per group file (stops that group on first blocking failure):
       1. az bicep build              — syntax check
-      2. az deployment sub validate  — ARM schema validation (sub-scoped templates)
-         az deployment group validate (RG-scoped templates, legacy)
-      3. az deployment sub what-if   — dry-run (sub-scoped templates)
-         az deployment group what-if (RG-scoped templates, legacy)
+      2. az deployment sub validate  — ARM schema validation (subscription scope)
+      3. az deployment sub what-if   — dry-run (subscription scope)
          Blocks on: Delete of data resources, public network re-enabled,
                     NSG allow-all additions, subscription-scope role changes
+    Then, once per environment (not per group):
       4. az policy state summarize   — policy compliance (Non-compliant Deny policies)
       5. Quota spot-checks           — storage + Function App limits
 
-    Results are written to  outputs/deployment-validation/what-if-<env>.json
-    and a summary to        outputs/deployment-validation/what-if-report.md
+    Results are written to  outputs/deployment-validation/what-if-<group>-<env>.json
+    (one per group) and a combined summary to outputs/deployment-validation/what-if-report.md
 
-    IMPORTANT: If main.bicep declares targetScope = 'subscription', this script
-    automatically uses 'az deployment sub' commands. Using group commands against
-    a subscription-scoped template will fail — this script enforces the correct scope.
+    IMPORTANT: Every main.<group>.bicep MUST declare targetScope = 'subscription'.
+    This script enforces 'az deployment sub' commands for every group and fails
+    loudly if a group file is not subscription-scoped.
 
 .PARAMETER Location
-    Azure region for the subscription-scope deployment (e.g. australiaeast).
-    Required for subscription-scoped templates.
+    Azure region for the subscription-scope deployments (e.g. australiaeast).
 
 .PARAMETER ResourceGroup
-    Azure resource group name used for post-deployment policy and quota checks.
+    Azure resource group name used for post-deployment policy and quota checks
+    (the same resource group every group file ensures).
 
 .PARAMETER Environment
     Target environment: dev | staging | prod
@@ -75,121 +79,103 @@ function Write-Pass    { param([string]$Msg) Write-Host "  [PASS]    $Msg" -Fore
 function Write-Warn    { param([string]$Msg) Write-Host "  [WARN]    $Msg" -ForegroundColor Yellow; $report.Add("- [ ] WARN: $Msg"); $Script:warnings++ }
 function Write-Block   { param([string]$Msg) Write-Host "  [BLOCKED] $Msg" -ForegroundColor Red;    $report.Add("- [ ] BLOCKED: $Msg"); $Script:blocking++ }
 
-$mainBicep  = Join-Path $BicepRoot 'main.bicep'
-$paramFile  = Join-Path $BicepRoot "parameters/$Environment.bicepparam"
 $outDir     = 'outputs/deployment-validation'
-$whatifFile = "$outDir/what-if-$Environment.json"
 $reportFile = "$outDir/what-if-report.md"
-
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
 $subArgs = if ($Subscription) { @('--subscription', $Subscription) } else { @() }
 
-# Detect template scope
-$bicepContent = Get-Content $mainBicep -Raw -ErrorAction SilentlyContinue
-$isSubScope = $bicepContent -match "targetScope\s*=\s*'subscription'"
-
-# ── 0. Scope gate ────────────────────────────────────────────────────────────
-Write-Step "Step 0 — Subscription-scope gate"
-if ($isSubScope) {
-    Write-Pass "main.bicep is subscription-scoped — using 'az deployment sub' commands"
-} else {
-    Write-Warn "main.bicep is resource-group-scoped — using 'az deployment group' commands (legacy)"
+$groupFiles = Get-ChildItem -Path $BicepRoot -Filter 'main.*.bicep' -ErrorAction SilentlyContinue
+if (-not $groupFiles) {
+    Write-Error "No main.*.bicep group files found under '$BicepRoot'."
+    exit 1
 }
 
-# ── 1. Bicep syntax ─────────────────────────────────────────────────────────
-Write-Step "Step 1 — Bicep syntax (az bicep build)"
-az bicep restore --file $mainBicep --force *>$null
-az bicep build --file $mainBicep 2>&1 | Out-Null
-if ($LASTEXITCODE -ne 0) { Write-Block "az bicep build FAILED — fix syntax errors first"; exit 1 }
-Write-Pass "az bicep build"
+foreach ($gf in $groupFiles) {
+    $group      = ($gf.BaseName -replace '^main\.', '')   # e.g. main.compute.bicep -> compute
+    $paramFile  = Join-Path $BicepRoot "parameters/$Environment/$group.bicepparam"
+    $whatifFile = "$outDir/what-if-$group-$Environment.json"
 
-# ── 2. ARM validation ────────────────────────────────────────────────────────
-Write-Step "Step 2 — ARM template validation"
-if ($isSubScope) {
+    Write-Step "Group: $group ($($gf.Name))"
+
+    if (-not (Test-Path $paramFile)) {
+        Write-Warn "$group — no parameter file at parameters/$Environment/$group.bicepparam; skipping"
+        continue
+    }
+
+    # ── Scope gate ────────────────────────────────────────────────────────────
+    $bicepContent = Get-Content $gf.FullName -Raw -ErrorAction SilentlyContinue
+    if ($bicepContent -notmatch "targetScope\s*=\s*'subscription'") {
+        Write-Block "$group — targetScope = 'subscription' not found in $($gf.Name). Every group file must be subscription-scoped."
+        continue
+    }
+    Write-Pass "$group — subscription-scoped"
+
+    # ── Bicep syntax ──────────────────────────────────────────────────────────
+    az bicep restore --file $gf.FullName --force *>$null
+    az bicep build --file $gf.FullName 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Block "$group — az bicep build FAILED — fix syntax errors first"; continue }
+    Write-Pass "$group — az bicep build"
+
+    # ── ARM validation ────────────────────────────────────────────────────────
     $validateOutput = az deployment sub validate `
         --location $Location `
-        --template-file $mainBicep `
+        --template-file $gf.FullName `
         --parameters $paramFile `
         @subArgs `
         --output json 2>&1
     if ($LASTEXITCODE -ne 0) {
-        Write-Block "ARM validation failed: $validateOutput"
-        exit 1
+        Write-Block "$group — ARM validation failed: $validateOutput"
+        continue
     }
-    Write-Pass "az deployment sub validate"
-} else {
-    $validateOutput = az deployment group validate `
-        --resource-group $ResourceGroup `
-        --template-file $mainBicep `
-        --parameters $paramFile `
-        @subArgs `
-        --output json 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Block "ARM validation failed: $validateOutput"
-        exit 1
-    }
-    Write-Pass "az deployment group validate"
-}
+    Write-Pass "$group — az deployment sub validate"
 
-# ── 3. What-if dry run ───────────────────────────────────────────────────────
-Write-Step "Step 3 — What-if dry run"
-if ($isSubScope) {
+    # ── What-if dry run ───────────────────────────────────────────────────────
     $whatifOutput = az deployment sub what-if `
         --location $Location `
-        --template-file $mainBicep `
+        --template-file $gf.FullName `
         --parameters $paramFile `
         --output json `
         @subArgs 2>&1
-} else {
-    $whatifOutput = az deployment group what-if `
-        --resource-group $ResourceGroup `
-        --template-file $mainBicep `
-        --parameters $paramFile `
-        --mode Incremental `
-        --output json `
-        @subArgs 2>&1
+
+    $whatifOutput | Out-File $whatifFile -Encoding utf8
+    Write-Host "  Saved to $whatifFile"
+
+    try {
+        $wi = $whatifOutput | ConvertFrom-Json
+
+        $deletesOnData = $wi.properties.changes | Where-Object {
+            $_.changeType -eq 'Delete' -and
+            $_.resourceId -match 'storageAccounts|vaults|servers|namespaces|databaseAccounts|redis'
+        }
+        foreach ($d in $deletesOnData) {
+            Write-Block "$group — Delete on data resource: $($d.resourceId)"
+        }
+
+        $publicReEnabled = $wi.properties.changes | Where-Object {
+            $_.changeType -in ('Create','Modify') -and
+            ($_.delta | Where-Object { $_.path -match 'publicNetworkAccess' -and $_.after -eq 'Enabled' })
+        }
+        foreach ($p in $publicReEnabled) {
+            Write-Block "$group — publicNetworkAccess re-enabled on: $($p.resourceId)"
+        }
+
+        $newResources = $wi.properties.changes | Where-Object { $_.changeType -eq 'Create' }
+        if ($newResources) { Write-Warn "$group — $($newResources.Count) new resource(s) will be created (review expected)" }
+
+        $modifies = $wi.properties.changes | Where-Object { $_.changeType -eq 'Modify' }
+        if ($modifies) { Write-Warn "$group — $($modifies.Count) resource(s) will be modified (review expected)" }
+
+        if (-not $deletesOnData -and -not $publicReEnabled) {
+            Write-Pass "$group — no blocking conditions found in what-if output"
+        }
+    } catch {
+        Write-Warn "$group — could not parse what-if JSON — review $whatifFile manually"
+    }
 }
 
-$whatifOutput | Out-File $whatifFile -Encoding utf8
-Write-Host "  Saved to $whatifFile"
-
-try {
-    $wi = $whatifOutput | ConvertFrom-Json
-
-    # Blocking conditions
-    $deletesOnData = $wi.properties.changes | Where-Object {
-        $_.changeType -eq 'Delete' -and
-        $_.resourceId -match 'storageAccounts|vaults|servers|namespaces|databaseAccounts|redis'
-    }
-    foreach ($d in $deletesOnData) {
-        Write-Block "Delete on data resource: $($d.resourceId)"
-    }
-
-    $publicReEnabled = $wi.properties.changes | Where-Object {
-        $_.changeType -in ('Create','Modify') -and
-        ($_.delta | Where-Object { $_.path -match 'publicNetworkAccess' -and $_.after -eq 'Enabled' })
-    }
-    foreach ($p in $publicReEnabled) {
-        Write-Block "publicNetworkAccess re-enabled on: $($p.resourceId)"
-    }
-
-    # Warnings (expected changes)
-    $newResources = $wi.properties.changes | Where-Object { $_.changeType -eq 'Create' }
-    if ($newResources) { Write-Warn "$($newResources.Count) new resource(s) will be created (review expected)" }
-
-    $modifies = $wi.properties.changes | Where-Object { $_.changeType -eq 'Modify' }
-    if ($modifies) { Write-Warn "$($modifies.Count) resource(s) will be modified (review expected)" }
-
-    if (-not $deletesOnData -and -not $publicReEnabled) {
-        Write-Pass "No blocking conditions found in what-if output"
-    }
-} catch {
-    Write-Warn "Could not parse what-if JSON — review $whatifFile manually"
-}
-
-# ── 4. Policy compliance ─────────────────────────────────────────────────────
-Write-Step "Step 4 — Policy compliance check"
+# ── Policy compliance (once per environment, against the shared resource group) ─
+Write-Step "Policy compliance check ($ResourceGroup)"
 $policyOutput = az policy state summarize --resource-group $ResourceGroup @subArgs --output json 2>&1 | ConvertFrom-Json
 $nonCompliant = $policyOutput.results.nonCompliantResources
 if ($nonCompliant -gt 0) {
@@ -198,8 +184,8 @@ if ($nonCompliant -gt 0) {
     Write-Pass "Policy compliance — 0 non-compliant resources"
 }
 
-# ── 5. Quota spot-checks ─────────────────────────────────────────────────────
-Write-Step "Step 5 — Quota spot-checks"
+# ── Quota spot-checks (once per environment) ──────────────────────────────────
+Write-Step "Quota spot-checks"
 $storageUsage = az resource list --resource-group $ResourceGroup --resource-type Microsoft.Storage/storageAccounts @subArgs --output json 2>&1 | ConvertFrom-Json
 if ($storageUsage.Count -ge 240) {
     Write-Warn "Storage account count is $($storageUsage.Count) — approaching 250/region limit"
@@ -207,8 +193,7 @@ if ($storageUsage.Count -ge 240) {
     Write-Pass "Storage account count: $($storageUsage.Count) (limit 250)"
 }
 
-# ── Write report ─────────────────────────────────────────────────────────────
-$scopeLabel = if ($isSubScope) { 'subscription' } else { 'resourceGroup' }
+# ── Write combined report ─────────────────────────────────────────────────────
 $reportContent = @"
 # What-If Validation Report — $Environment
 
@@ -216,7 +201,7 @@ $reportContent = @"
 **Environment:** $Environment
 **Location:** $Location
 **Resource Group:** $ResourceGroup
-**Template Scope:** $scopeLabel
+**Groups validated:** $(($groupFiles | ForEach-Object { ($_.BaseName -replace '^main\.', '') }) -join ', ')
 **Status:** $(if ($blocking -gt 0) { 'BLOCKED' } elseif ($warnings -gt 0) { 'PASS (with warnings)' } else { 'PASS' })
 
 ## Checks
@@ -224,7 +209,7 @@ $reportContent = @"
 $($report | ForEach-Object { $_ } | Out-String)
 
 ## What-If Output
-Saved to: $whatifFile
+Saved per group to: outputs/deployment-validation/what-if-<group>-$Environment.json
 "@
 
 $reportContent | Out-File $reportFile -Encoding utf8
@@ -237,3 +222,4 @@ if ($blocking -gt 0) {
     exit 1
 }
 Write-Host "RESULT: Validation PASSED ($warnings warning(s))" -ForegroundColor Green
+

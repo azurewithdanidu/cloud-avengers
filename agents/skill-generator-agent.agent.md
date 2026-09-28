@@ -90,10 +90,30 @@ Use this exact structure when creating a new skill:
 ```text
 skills/<skill-name>/
 ├── SKILL.md
-├── scripts/        # optional
-├── references/     # optional
-└── assets/         # optional
+├── steps/           # optional — ordered procedure files for multi-stage workflows (01-*.md, 02-*.md, ...)
+├── references/      # optional — lookup tables, mapping catalogs, schemas, runbooks
+├── scripts/         # optional — deterministic checks/transformations (paired .sh + .ps1)
+└── assets/          # optional
 ```
+
+**Keep `SKILL.md` a concise controller, not a monolith.** If `SKILL.md` is approaching or exceeding
+~300 lines:
+
+- Move large per-scenario code examples, mapping tables, and catalogs into `references/<topic>.md`
+  and link to them from `SKILL.md` instead of inlining them. Group the `Process` section into a
+  table that states which reference file to load for which case, so the agent only loads the
+  relevant one.
+- Move a genuinely multi-stage, ordered procedure (numbered steps that each have their own
+  prerequisites, actions, and checks) into `steps/NN-<name>.md` files, one per stage. Each step file
+  should state its prerequisite (the previous step or artifact), then link to the next step. Keep a
+  short numbered summary with links to each step file in `SKILL.md`'s `Process` section.
+- Do **not** split a skill just because it is long if the content is a single cohesive procedure —
+  only split when there are genuinely distinct stages or independently loadable reference material.
+- Always verify every relative link you add (`references/...`, `steps/...`) resolves to a file that
+  actually exists.
+
+See `skills/sdk-migration/` (reference-heavy split) and `skills/module-organization/` or
+`skills/orchestration/` (steps + references split) for worked examples of this pattern.
 
 **Mandatory skill file structure:**
 
@@ -291,7 +311,7 @@ Use this map to avoid duplication and to find the right file to extend:
 | Skill | Covers |
 |---|---|
 | `smoke-testing` | End-to-end checks for 8 Azure service types |
-| `what-if-validation` | `az deployment group what-if` blocking condition checks |
+| `what-if-validation` | `az deployment sub what-if` blocking condition checks, run per grouped orchestrator file |
 
 ### Skills commonly used by `pipeline-builder-agent`
 | Skill | Covers |
