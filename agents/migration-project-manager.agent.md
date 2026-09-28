@@ -279,6 +279,7 @@ other — all three consume the Phase 2 design document and write to different o
 **Exact prompt to send:**
 > Use the **Phase 3a copy-paste prompt** from `skills/phase-delegation/SKILL.md`.  
 > Do not paraphrase or shorten the prompt.
+> Phase 3a has no `<placeholder>` values; send the prompt exactly as written.
 
 **Artifact completion check:**
 - At least one `outputs/bicep-templates/main.*.bicep` group file exists
@@ -326,6 +327,7 @@ proceed to Phase 4.
 
 > Use the **Phase 4 copy-paste prompt** from `skills/phase-delegation/SKILL.md`.  
 > Do not paraphrase or shorten the prompt.
+> Preserve the requirement that `outputs/validation-report.md` starts with `## Status: PASSED` or `## Status: FAILED`.
 
 **Artifact completion check:**
 - `outputs/validation-report.md` exists
