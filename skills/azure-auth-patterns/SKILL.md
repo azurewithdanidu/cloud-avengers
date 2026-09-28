@@ -21,9 +21,17 @@ Replace all AWS IAM-based authentication patterns with Azure Managed Identity an
 - Do not run `scripts/assign-rbac.*` against a live subscription without explicit user confirmation of the principal, scope, and role — it is a mutating, privileged operation (`az role assignment create`), not a read-only check.
 - Do not use this skill to grant `Owner` or subscription-scoped roles — see Rules below for least-privilege requirements.
 
-## Process
+## Inputs
 
-**In Bicep (infrastructure):**
+| Path | Why it matters |
+|---|---|
+| `outputs/azure-architecture-output/design-document.md` | Section 5 defines compute resources needing managed identity; Section 6 defines functions needing DefaultAzureCredential |
+| `outputs/bicep-templates/` | Target Bicep files to add identity blocks and role assignments to |
+| `source-app/app-code/lambda/` | Source handlers to understand which AWS IAM permissions must be mapped to Azure RBAC roles |
+
+
+
+## Process
 
 1. Enable system-assigned managed identity on every compute resource:
    ```bicep
@@ -98,7 +106,7 @@ Replace all AWS IAM-based authentication patterns with Azure Managed Identity an
 - **Never hardcode subscription IDs, tenant IDs, or client IDs** in application code — read from `os.environ`.
 - **Always use `DefaultAzureCredential`** in Python, not `ClientSecretCredential` or `ManagedIdentityCredential` directly.
 
-## Output
+## Outputs
 
 - Bicep files with `identity: { type: 'SystemAssigned' }` on all compute resources
 - Bicep `roleAssignment` resources for every service-to-service access requirement
@@ -106,7 +114,7 @@ Replace all AWS IAM-based authentication patterns with Azure Managed Identity an
 
 ---
 
-## Companion Scripts
+## Scripts
 
 | Script | Purpose |
 |---|---|
@@ -184,4 +192,3 @@ fi
 ```
 
 **Parameter naming convention:** Bash uses `--kebab-case`; PowerShell uses `-PascalCase`. Both produce identical output.
-
