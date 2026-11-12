@@ -7,6 +7,21 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- MIT license file and explicit supported-workload tiers with MCP prerequisites and recovery guidance.
+
+### Fixed
+
+- README version now matches plugin version 1.5.0; corrected the remaining Quick Start slash-command typo and canonical plugin homepage/repository URLs.
+- Removed the implicit Sydney region default from the command, project manager, and discovery authentication instructions; require a confirmed primary region while retaining all-enabled-region discovery.
+- Discovery now distinguishes unavailable MCP servers from authentication failures and explicitly blocks incomplete enumeration.
+- Corrected the documented skill-generator filename and grouped Bicep output layout.
+
+---
+
 ## [1.5.0] - 2026-11-12
 
 ### Added

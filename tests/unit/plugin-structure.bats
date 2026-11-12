@@ -17,6 +17,29 @@ REPO_ROOT="$BATS_TEST_DIRNAME/../.."
   [ "$status" -eq 0 ]
 }
 
+@test "README version matches the canonical plugin version" {
+  VERSION=$(jq -r '.version' "$REPO_ROOT/.claude-plugin/plugin.json")
+  run grep -F "**Version:** $VERSION " "$REPO_ROOT/README.md"
+  [ "$status" -eq 0 ]
+}
+
+@test "README migration slash commands resolve to the shipped command" {
+  run grep -oE '/run-migration[A-Za-z0-9_-]*' "$REPO_ROOT/README.md"
+  [ "$status" -eq 0 ]
+  while IFS= read -r command; do
+    [ -f "$REPO_ROOT/commands/${command#/}.md" ]
+  done <<< "$output"
+}
+
+@test "migration entry points require a region without an implicit default" {
+  for file in commands/run-migration.md agents/migration-project-manager.agent.md; do
+    run grep -E '^\| .*AWS Region.*required|^\| `aws_region`.*required' "$REPO_ROOT/$file"
+    [ "$status" -eq 0 ]
+    run grep -F 'ap-southeast-2' "$REPO_ROOT/$file"
+    [ "$status" -eq 1 ]
+  done
+}
+
 @test "all 10 agent files exist" {
   for agent in \
     "aws-discovery.agent.md" \

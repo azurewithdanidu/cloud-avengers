@@ -24,7 +24,9 @@ At the very start of any run (except `status`), confirm you have the following t
 | Input | Description | Default |
 |---|---|---|
 | `aws_account_id` | 12-digit AWS account number to migrate from | *(required — no default)* |
-| `aws_region` | Primary AWS region where resources are deployed | `ap-southeast-2` (Sydney) |
+| `aws_region` | Primary AWS region where resources are deployed | *(required — no default)* |
+
+Never infer a region from an example or silently choose one. The confirmed primary region is context, not a restriction on Phase 1's all-enabled-region scan.
 
 Record both values at the top of `outputs/migration-task-plan.md` under a **Migration Scope** heading when you initialise the file. Pass them explicitly in every worker agent prompt using the format:
 

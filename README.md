@@ -1,8 +1,8 @@
 # AI-Assisted AWS to Azure Migration Factory
 
-**Version:** 1.0.0 · [CHANGELOG](CHANGELOG.md) · [AGENTS.md](AGENTS.md)
+**Version:** 1.5.0 · [CHANGELOG](CHANGELOG.md) · [AGENTS.md](AGENTS.md)
 
-A publishable plugin providing **10 specialist migration agents** and **22 skills** that orchestrate the full AWS-to-Azure migration pipeline — from live account discovery through architecture design, code refactoring, IaC generation, CI/CD pipelines, and deployment validation.
+A publishable plugin providing **10 specialist migration agents** and **22 skills** for an AWS-to-Azure migration workflow focused on Python serverless workloads and CloudFormation — from live account discovery through architecture design, code refactoring, IaC generation, CI/CD pipelines, and deployment validation. This is not a general-purpose migration engine for every AWS workload; see [Supported Workloads](#supported-workloads).
 
 Installable as a plugin in Copilot CLI, Claude Code, and VS Code. All skill scripts run on macOS, Linux, WSL, and Windows (Bash + PowerShell 5.1 / 7+).
 
@@ -31,19 +31,21 @@ After installing, start a migration with:
 
 **Prerequisites:**
 - VS Code with the GitHub Copilot extension (agent mode enabled)
-- AWS CLI configured with read access to the source account
+- AWS credentials configured for the AWS MCP server with read access to the source account (AWS CLI may be used for local credential setup, not as a discovery fallback)
+- Explicit AWS account ID and primary region; there is no default region. Discovery still scans all enabled regions.
 - Azure CLI with Contributor access to the target subscription
-- MCP servers configured: AWS Cloud Control API · AWS Knowledge · Microsoft Learn · Azure · Mermaid Chart
+- MCP servers configured and authenticated: AWS Cloud Control API · AWS Knowledge · Microsoft Learn · Azure · Mermaid Chart (see [MCP Requirements and Recovery](#mcp-requirements-and-recovery))
+- Source code and CloudFormation/SAM template staged under read-only `source-app/` (expected paths: `app-code/template.yaml`, `app-code/lambda/`, and optional `doc/`)
 
 **Option 1 — Slash command (recommended):**
 ```
-/run-migrationere
+/run-migration
 ```
-The slash command guides you through supplying your AWS account ID and Azure subscription, then hands off to `@migration-project-manager` to run all phases automatically.
+The slash command collects your AWS account ID and primary region, then hands off to `@migration-project-manager`. Confirm the target Azure subscription and review generated artifacts before deployment.
 
 **Option 2 — Invoke the orchestrator directly:**
 ```
-@migration-project-manager Run the full migration pipeline for AWS account <your-account-id>
+@migration-project-manager Run the migration pipeline for AWS account <your-account-id> in region <your-aws-region>
 ```
 
 **Option 3 — Run individual phases:**
@@ -57,6 +59,29 @@ The slash command guides you through supplying your AWS account ID and Azure sub
 | 3c — Pipelines | `@pipeline-builder-agent` | `Create GitHub Actions CI/CD pipelines for infra, functions, and static web app` |
 | 3d — Deploy | `@azure-deployer` | `Deploy the generated Bicep and Azure Functions to the target subscription` |
 | 4 — Validation | `@deployment-validation` | `Validate all generated artifacts and produce a validation report` |
+
+---
+
+## Supported Workloads
+
+These tiers describe the implemented guidance, not a guarantee of functional parity. Review and test all generated artifacts before deployment.
+
+| Tier | Workloads | Boundary |
+|---|---|---|
+| Green - primary path | Python Lambda, API Gateway, S3, DynamoDB, CloudFormation/SAM | Python Lambda to Azure Functions v2 and CloudFormation to grouped Bicep are the strongest paths. DynamoDB mapping requires application-specific validation; automated data transfer is not provided. |
+| Yellow - limited/manual | Node.js Lambda, simple networking | Partial guidance only; expect manual refactoring and validation, not an established end-to-end path. |
+| Red - outside the automated path | EC2/VMs, ECS/EKS/containers, complex databases and data migration, Step Functions, complex networking, multi-account Organizations, .NET and other runtimes, Terraform and other non-CloudFormation IaC | Discovery or mapping guidance may exist, but automated transformation, deployment, and parity validation are not established. Use workload-specific migration tooling and engineering review. |
+
+## MCP Requirements and Recovery
+
+The current workflow depends on **AWS Cloud Control API**, **AWS Knowledge**, **Microsoft Learn**, **Azure**, and **Mermaid Chart** MCP servers for its respective phases. See [MCP Servers](#mcp-servers) for responsibilities. Verify connectivity, credentials, permissions, and required API/tool availability before starting a live run.
+
+- **Missing or misconfigured AWS MCP:** stop Phase 1, install/configure the server in your host runtime, and reconnect. Local templates do not substitute for a live inventory.
+- **Authentication failure:** configure SSO or short-lived credentials locally for the MCP server, then retry `sts:GetCallerIdentity` through MCP. Never paste credentials into chat or commit them.
+- **Throttling or partial discovery:** report the failing calls and affected regions/services, wait for the provider's retry window, and retry the incomplete enumeration. Do not mark Phase 1 complete or pass a partial inventory downstream.
+- **Other required MCP unavailable:** stop the affected phase, report the dependency, restore access, and resume that phase after its prerequisites have passed.
+
+**No automatic AWS CLI, Config, or Resource Explorer discovery fallback is implemented.** If MCP cannot be restored, use separate read-only tooling for manual assessment; do not report that assessment as a completed plugin migration.
 
 ---
 
@@ -79,7 +104,7 @@ agents/                     ← USER-FACING PRODUCT. All 10 migration agents liv
 ├── azure-deployer.agent.md              ← Phase 3d
 ├── deployment-validation.agent.md       ← Phase 4
 ├── skill-evolution-engine.agent.md      ← Meta: fix/improve existing skills
-└── skill-generator-agent.md             ← Meta: create new skills
+└── skill-generator-agent.agent.md       ← Meta: create new skills
 
 commands/
 └── run-migration.md        ← /run-migration slash command. Primary user entry point.
@@ -181,7 +206,7 @@ Maps AWS services to Azure equivalents, produces a full architecture design docu
 ![Phase 2: Architecture Design](assets/Slide13.JPG)
 
 ### `@iac-transformation`
-Converts AWS CloudFormation to modular Azure Bicep using AVM modules. Generates a subscription-scoped `main.bicep`, individual resource modules, and three environment parameter files (`dev`, `staging`, `prod`). Outputs write to `outputs/bicep-templates/`.
+Converts AWS CloudFormation to grouped, subscription-scoped Azure Bicep orchestrators (`main.<group>.bicep`) that call AVM modules directly, without local resource modules. Generates per-group parameter files at `parameters/<env>/<group>.bicepparam` for `dev`, `staging`, and `prod`. Outputs write to `outputs/bicep-templates/`.
 
 ### `@code-refactor`
 Rewrites Python Lambda handlers to Azure Functions v2 (decorator model). Replaces `boto3` with `azure-storage-blob` + `azure-identity`. Updates the frontend to remove AWS SDK dependencies. Outputs write to `outputs/azure-functions/` and `outputs/static-web-app/`.

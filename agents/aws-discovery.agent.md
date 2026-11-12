@@ -87,7 +87,9 @@ Before running any discovery step, verify that the AWS MCP Server is reachable a
 
 1. Attempt to call `sts:GetCallerIdentity` via the AWS MCP Server.
 2. **If the call succeeds** — record the account ID and proceed to Processing Steps.
-3. **If the call fails** (MCP server not configured, credential error, connection refused, or any auth-related error) — **stop and ask the user to supply AWS credentials** using the prompt below. Do not attempt discovery until authentication is confirmed.
+3. **If the MCP server is missing or unreachable** — stop, report the connection/configuration error, and ask the user to configure or reconnect the server. Do not request credentials for a missing server or substitute local files or AWS CLI discovery.
+4. **If authentication fails** — stop and ask the user to configure credentials locally using the prompt below. Never ask for secret values in chat. Do not attempt discovery until authentication is confirmed.
+5. **If an API is throttled or enumeration is incomplete** — record the failing calls and affected regions/services, retry after the provider's retry window, and leave Phase 1 blocked if coverage cannot be recovered. Never treat a partial inventory as complete.
 
 ### Authentication Failure — Ask the User
 
@@ -96,7 +98,7 @@ When MCP auth fails, display this message and wait for the user to respond befor
 ---
 
 > **AWS MCP Server authentication is not configured or has failed.**
-> Please provide one of the following so the agent can authenticate:
+> Configure one of the following locally for the MCP server; do not send credentials in chat:
 >
 > **Option A — AWS SSO (recommended)**
 > Run the following in a terminal, then reply "done" when complete:
@@ -111,11 +113,11 @@ When MCP auth fails, display this message and wait for the user to respond befor
 > aws configure set aws_access_key_id <YOUR_ACCESS_KEY_ID>
 > aws configure set aws_secret_access_key <YOUR_SECRET_ACCESS_KEY>
 > aws configure set aws_session_token <YOUR_SESSION_TOKEN>   # if using temporary credentials
-> aws configure set region ap-southeast-2
+> aws configure set region <YOUR_CONFIRMED_AWS_REGION>
 > ```
 >
 > **Option C — Environment variables already set**
-> If `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_DEFAULT_REGION` are already exported in your shell, reply "done" and the MCP server will pick them up automatically.
+> If credentials and `AWS_REGION` or `AWS_DEFAULT_REGION` are already configured, verify that the MCP server process receives them, reconnect if necessary, then reply "done".
 >
 > Once you have completed authentication, reply **"done"** and this agent will retry `sts:GetCallerIdentity` to confirm access before starting discovery.
 
@@ -130,7 +132,7 @@ After the user replies "done", retry `sts:GetCallerIdentity`. If it still fails,
 > **Use the AWS MCP Server for all live queries — do NOT read `source-app/` as a substitute for querying AWS. Local files are supplementary only.**
 
 1. Call `sts:GetCallerIdentity` via the AWS MCP Server — see **Authentication** section above; do not proceed until this succeeds
-2. List all active regions for the account; scope all subsequent API calls to every active region
+2. Use the user-confirmed primary region for initial regional calls; never silently default to a region. List all enabled regions for the account and enumerate regional resources in each, including global services as appropriate.
 3. Enumerate all live resources using the AWS MCP Server — use the **AWS Services Catalogue** section of the `aws-discovery` skill as the minimum scan list; start with `resourcegroupstaggingapi:GetResources` for a broad baseline, then service-specific APIs for full detail
 4. Read `source-app/app-code/template.yaml` and Lambda source files to cross-check deployed resources and discover implicit boto3 SDK dependencies not visible in live resource metadata
 5. For each resource, capture all attributes defined in the **Key Attributes** section of the skill using live API response data as the authoritative value
