@@ -37,7 +37,7 @@ After installing, start a migration with:
 
 **Option 1 — Slash command (recommended):**
 ```
-/run-migration
+/run-migrationere
 ```
 The slash command guides you through supplying your AWS account ID and Azure subscription, then hands off to `@migration-project-manager` to run all phases automatically.
 
