@@ -1,6 +1,6 @@
 # AI-Assisted AWS to Azure Migration Factory
 
-**Version:** 1.5.0 · [CHANGELOG](CHANGELOG.md) · [AGENTS.md](AGENTS.md)
+**Version:** 1.6.0 · [CHANGELOG](CHANGELOG.md) · [AGENTS.md](AGENTS.md)
 
 A publishable plugin providing **10 specialist migration agents** and **22 skills** for an AWS-to-Azure migration workflow focused on Python serverless workloads and CloudFormation — from live account discovery through architecture design, code refactoring, IaC generation, CI/CD pipelines, and deployment validation. This is not a general-purpose migration engine for every AWS workload; see [Supported Workloads](#supported-workloads).
 

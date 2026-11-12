@@ -9,6 +9,8 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-13
+
 ### Added
 
 - MIT license file and explicit supported-workload tiers with MCP prerequisites and recovery guidance.
