@@ -51,13 +51,23 @@ echo "    Role      : $ROLE ($RESOLVED_ROLE)"
 echo "    Principal : $PRINCIPAL_ID"
 echo "    Scope     : $SCOPE"
 
+if [[ ! -t 0 ]]; then
+  echo "ERROR: Interactive human confirmation is required; RBAC assignment was not started." >&2
+  exit 1
+fi
+read -r -p "Type APPROVE to assign this role; any other response cancels: " CONFIRMATION
+if [[ "$CONFIRMATION" != "APPROVE" ]]; then
+  echo "ERROR: RBAC assignment cancelled." >&2
+  exit 1
+fi
+
 # Check if assignment already exists (idempotent)
 EXISTING=$(az role assignment list \
     --assignee "$PRINCIPAL_ID" \
     --role "$RESOLVED_ROLE" \
     --scope "$SCOPE" \
     "${SUB_ARGS[@]}" \
-    --query "[0].id" -o tsv 2>/dev/null || true)
+    --query "[0].id" -o tsv)
 
 if [[ -n "$EXISTING" ]]; then
   echo "    Already assigned — skipping (idempotent)"

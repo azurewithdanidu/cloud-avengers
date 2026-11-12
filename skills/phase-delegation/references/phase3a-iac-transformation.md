@@ -27,6 +27,7 @@ Requirements:
 4. Use secure defaults, managed identity, and current API versions.
 5. Update only your Phase 3a row and Phase 3a task list in outputs/migration-task-plan.md.
 6. If Section 5 is incomplete or ambiguous, stop and mark a blocker instead of guessing.
+7. Run skills/module-organization/scripts/validate-bicep.sh or its .ps1 counterpart with the generated Bicep root and require exit code 0. Before deployment, repeat with the confirmed environment, location, and subscription for what-if; missing parameters, CLI failures, malformed results, or blocking deletes fail the gate.
 ```
 
 **Artifact acceptance checks**

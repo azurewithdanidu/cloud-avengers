@@ -80,18 +80,20 @@ Each step file states its own prerequisites and links to the next step — follo
 | `scripts/resolve-avm-version.ps1` | Resolves the latest published version tag for any AVM module from its CHANGELOG |
 | `scripts/resolve-avm-version.sh` | Bash equivalent of the above |
 | `scripts/validate-bicep.ps1` | Runs `az bicep restore` + `az bicep build` on every `main.*.bicep` file; optionally runs what-if per environment per group |
+| `scripts/validate-bicep.sh` | Bash counterpart; requires jq for what-if result validation |
 
-Agents should run `validate-bicep.ps1` immediately after generating or modifying any Bicep file:
+Run either validator immediately after generation and require exit code 0. Before deployment,
+supply the confirmed environment, location, and subscription. Missing group parameters, failed
+CLI calls, malformed what-if results, and blocking deletes are failures, not manual-review passes.
 
 ```powershell
-./scripts/validate-bicep.ps1 \
-    -ResourceGroup "rg-dev-migration" -Environment dev
+./scripts/validate-bicep.ps1 -Environment dev -Location "<azure-region>" -Subscription "<subscription-id>"
 ```
 
 Look up the correct AVM module version before pinning it in a `.bicepparam`:
 
 ```powershell
-./scripts/resolve-avm-version.ps1 \
+./scripts/resolve-avm-version.ps1 `
     -ModulePath "storage/storage-account"
 ```
 
@@ -134,27 +136,12 @@ Look up the correct AVM module version before pinning it in a `.bicepparam`:
 
 ## Runtime Detection
 
-This skill supports both Bash and PowerShell. Use the following detection order:
+Run from this skill directory. Use Bash first; otherwise PowerShell 7+. Both PowerShell scripts require version 7; Windows PowerShell 5.1 is not supported.
 
 | Priority | Runtime | Condition | Script |
 |---|---|---|---|
-| 1 (preferred) | Bash | `curl` and `jq` available on PATH | `scripts/<name>.sh` |
-| 2 | PowerShell 7+ | `pwsh` available on PATH | `scripts/<name>.ps1` |
-| 3 (fallback) | Windows PowerShell 5.1 | `powershell.exe` available | `scripts/<name>.ps1 -ExecutionPolicy RemoteSigned` |
+| 1 (preferred) | Bash | Azure CLI; jq for what-if, curl for version resolution | `bash scripts/validate-bicep.sh [args]` or `bash scripts/resolve-avm-version.sh [args]` |
+| 2 | PowerShell 7+ | `pwsh`; Azure CLI for validation | `pwsh -File scripts/validate-bicep.ps1 [args]` or `pwsh -File scripts/resolve-avm-version.ps1 [args]` |
 
-**Detection snippet (Bash):**
-```bash
-if command -v curl &>/dev/null && command -v jq &>/dev/null; then
-  bash scripts/<name>.sh [args]
-elif command -v pwsh &>/dev/null; then
-  pwsh -File scripts/<name>.ps1 [args]
-elif command -v powershell.exe &>/dev/null; then
-  powershell.exe -ExecutionPolicy RemoteSigned -File scripts/<name>.ps1 [args]
-else
-  echo "ERROR: Requires curl+jq (Bash) or PowerShell 7+ (pwsh)"
-  exit 1
-fi
-```
-
-**Parameter naming convention:** Bash uses `--kebab-case`; PowerShell uses `-PascalCase`. Both produce identical output.
+If neither runtime is available, stop and report the missing prerequisite.
 

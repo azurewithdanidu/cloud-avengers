@@ -31,7 +31,7 @@ As the first action in Phase 1, before any other discovery work.
 4. **Capture attributes** — For each discovered resource, capture every attribute defined in the **Key Attributes** section using live API response data as the authoritative value.
 5. **Map dependencies** — Use the live IAM role-to-resource bindings, environment variable references, and event source mappings returned by the AWS MCP Server to build the dependency graph. Supplement with boto3 call analysis from step 3.
 6. **Write output files** — Write the four output files using the schemas in this skill.
-7. **Run the Validation Checklist** before marking Phase 1 complete.
+7. **Run `scripts/validate-inventory.sh` or `scripts/validate-inventory.ps1` and require exit code 0**, then perform the Validation Checklist before marking Phase 1 complete. A missing runtime or failed validation blocks the phase; a non-empty file is not sufficient.
 
 ---
 

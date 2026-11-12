@@ -89,18 +89,21 @@ Load only the file relevant to the current task — do not load all of them:
 create`, `az ad sp create`, `az role assignment create`, `az ad app federated-credential create`).
 Document the intended command in `outputs/pipeline/setup-oidc.md` first and get explicit user
 confirmation of the org, repo, environment, subscription, and resource group before running it.
-Run once per environment before creating GitHub workflows:
+Both scripts require an interactive `APPROVE` response before Azure calls; never automate that
+response. PowerShell `-WhatIf` makes no Azure calls and writes no summary. Configure external host
+tool permissions as well; the script prompt cannot prevent direct CLI/MCP use by an authorized
+agent. Run once per environment before creating GitHub workflows:
 
 ```powershell
-./scripts/setup-oidc.ps1 \
-    -GitHubOrg "azurewithdanidu" \
-    -GitHubRepo "ai-assisted-aws-to-azure-migration" \
-    -Environment prod \
-    -Subscription "<subscription-id>" \
+./scripts/setup-oidc.ps1 `
+    -GitHubOrg "azurewithdanidu" `
+    -GitHubRepo "cloud-avengers" `
+    -Environment prod `
+    -Subscription "<subscription-id>" `
     -ResourceGroup "rg-prod-migration"
 ```
 
-The script prints the three GitHub Secrets values (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`) and writes `outputs/pipeline/setup-oidc.md`.
+Both scripts print the three GitHub Secrets values (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`). The PowerShell script also writes `outputs/pipeline/setup-oidc.md`; keep the documented human setup plan when using Bash.
 
 ---
 
@@ -141,26 +144,11 @@ The script prints the three GitHub Secrets values (`AZURE_CLIENT_ID`, `AZURE_TEN
 
 ## Runtime Detection
 
-This skill supports both Bash and PowerShell. Use the following detection order:
+Run from this skill directory. Use Bash first; otherwise PowerShell 7+. The PowerShell script requires version 7 and does not support Windows PowerShell 5.1.
 
 | Priority | Runtime | Condition | Script |
 |---|---|---|---|
-| 1 (preferred) | Bash | `curl` and `jq` available on PATH | `scripts/<name>.sh` |
-| 2 | PowerShell 7+ | `pwsh` available on PATH | `scripts/<name>.ps1` |
-| 3 (fallback) | Windows PowerShell 5.1 | `powershell.exe` available | `scripts/<name>.ps1 -ExecutionPolicy RemoteSigned` |
+| 1 (preferred) | Bash | Azure CLI, interactive terminal | `bash scripts/setup-oidc.sh <org> <repo> <env> <subscription> <resource-group>` |
+| 2 | PowerShell 7+ | `pwsh`, Azure CLI, interactive host | `pwsh -File scripts/setup-oidc.ps1 -GitHubOrg <org> -GitHubRepo <repo> -Environment <env> -Subscription <id> -ResourceGroup <rg>` |
 
-**Detection snippet (Bash):**
-```bash
-if command -v curl &>/dev/null && command -v jq &>/dev/null; then
-  bash scripts/<name>.sh [args]
-elif command -v pwsh &>/dev/null; then
-  pwsh -File scripts/<name>.ps1 [args]
-elif command -v powershell.exe &>/dev/null; then
-  powershell.exe -ExecutionPolicy RemoteSigned -File scripts/<name>.ps1 [args]
-else
-  echo "ERROR: Requires curl+jq (Bash) or PowerShell 7+ (pwsh)"
-  exit 1
-fi
-```
-
-**Parameter naming convention:** Bash uses `--kebab-case`; PowerShell uses `-PascalCase`. Both produce identical output.
+If neither runtime is available, stop and report the missing prerequisite.

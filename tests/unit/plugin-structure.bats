@@ -81,6 +81,15 @@ REPO_ROOT="$BATS_TEST_DIRNAME/../.."
   [ "$FAIL" -eq 0 ]
 }
 
+@test "skill scripts have an owning skill and non-empty dual implementations" {
+  while IFS= read -r script; do
+    skill_dir=$(dirname "$(dirname "$script")")
+    [ -f "$skill_dir/SKILL.md" ]
+    [ -s "${script%.*}.sh" ]
+    [ -s "${script%.*}.ps1" ]
+  done < <(find "$REPO_ROOT/skills" -path "*/scripts/*" \( -name "*.sh" -o -name "*.ps1" \))
+}
+
 @test "no stale .github/agents paths in agents/ files" {
   run bash -c "grep -r '\.github/agents' '$REPO_ROOT/agents/' 2>/dev/null || true"
   [ -z "$output" ]

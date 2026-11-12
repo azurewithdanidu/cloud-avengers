@@ -37,6 +37,15 @@ Before doing anything, confirm the following. If any value is missing, ask the u
 
 Once all inputs are confirmed, proceed to Step 2.
 
+**Approval gate:** before the first mutating action, present the exact deployment plan, target
+subscription/environment/resource group, template and parameter files, application artifacts,
+and what-if effects. Require explicit human approval and record it in `outputs/deployment-log.md`.
+Input collection, authentication, and a general "run migration" request are not approval.
+If approval is missing or denied, stop and provide the commands for human execution. Reconfirm
+if the target, artifacts, or planned effects change, including repair, fallback, and rollback.
+Never bypass approval by switching from CLI to MCP. Use externally enforced host tool permissions
+or environment approvals; agent instructions alone are not a non-bypassable security boundary.
+
 ---
 
 ## Step 2 — Verify Azure Authentication

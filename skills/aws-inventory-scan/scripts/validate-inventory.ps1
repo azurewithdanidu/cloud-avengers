@@ -61,11 +61,11 @@ function Test-PropertyValue {
         return $false
     }
 
-    if ($property.Value -is [string]) {
-        return -not [string]::IsNullOrWhiteSpace($property.Value)
+    if ($Name -eq 'discovery_timestamp' -and $property.Value -is [datetime]) {
+        # ConvertFrom-Json materializes ISO timestamp strings as DateTime on some versions.
+        return $true
     }
-
-    return $null -ne $property.Value
+    return $property.Value -is [string] -and -not [string]::IsNullOrWhiteSpace($property.Value)
 }
 
 function Get-FirstPropertyValue {
@@ -76,8 +76,8 @@ function Get-FirstPropertyValue {
 
     foreach ($name in $Names) {
         $property = $Object.PSObject.Properties[$name]
-        if ($null -ne $property -and -not [string]::IsNullOrWhiteSpace([string]$property.Value)) {
-            return [string]$property.Value
+        if ($null -ne $property -and $property.Value -is [string] -and -not [string]::IsNullOrWhiteSpace($property.Value)) {
+            return $property.Value
         }
     }
 
@@ -109,12 +109,18 @@ try {
 }
 
 Write-Host '==> Checking top-level schema' -ForegroundColor Cyan
-foreach ($requiredKey in @('discovery_timestamp', 'aws_account_id', 'aws_region', 'services')) {
+if ($inventory -isnot [pscustomobject]) {
+    Invoke-ValidationFailure 'Inventory root must be a JSON object.'
+}
+foreach ($requiredKey in @('discovery_timestamp', 'aws_account_id', 'aws_region')) {
     if (-not (Test-PropertyValue -Object $inventory -Name $requiredKey)) {
         Invoke-ValidationFailure "Missing required top-level key: $requiredKey"
     }
 }
 
+if ($inventory.services -isnot [pscustomobject]) {
+    Invoke-ValidationFailure "Top-level key 'services' must be a JSON object."
+}
 $serviceEntries = @($inventory.services.PSObject.Properties)
 if ($serviceEntries.Count -eq 0) {
     Invoke-ValidationFailure "The services object must contain at least one service entry."
@@ -126,13 +132,17 @@ foreach ($serviceEntry in $serviceEntries) {
     $serviceName = $serviceEntry.Name
     $service = $serviceEntry.Value
 
+    if ($service -isnot [pscustomobject]) {
+        Invoke-ValidationFailure "Service '$serviceName' must be a JSON object."
+    }
     if (-not (Test-PropertyValue -Object $service -Name 'service_type')) {
         Invoke-ValidationFailure "Service '$serviceName' is missing required field: service_type"
     }
 
-    $parsedCount = 0
     $countProperty = $service.PSObject.Properties['count']
-    if ($null -eq $countProperty -or -not [int]::TryParse([string]$countProperty.Value, [ref]$parsedCount) -or $parsedCount -lt 0) {
+    if ($null -eq $countProperty -or $countProperty.Value -isnot [ValueType] -or
+        $countProperty.Value -is [bool] -or $countProperty.Value -lt 0 -or
+        $countProperty.Value % 1 -ne 0) {
         Invoke-ValidationFailure "Service '$serviceName' is missing a valid numeric count field."
     }
 
@@ -141,6 +151,9 @@ foreach ($serviceEntry in $serviceEntries) {
     }
 
     $resources = @($service.resources)
+    if ($countProperty.Value -ne $resources.Count) {
+        Invoke-ValidationFailure "Service '$serviceName' count does not match resources array length."
+    }
     $totalResources += $resources.Count
 
     for ($index = 0; $index -lt $resources.Count; $index++) {

@@ -83,6 +83,16 @@ The current workflow depends on **AWS Cloud Control API**, **AWS Knowledge**, **
 
 **No automatic AWS CLI, Config, or Resource Explorer discovery fallback is implemented.** If MCP cannot be restored, use separate read-only tooling for manual assessment; do not report that assessment as a completed plugin migration.
 
+## Validation and Mutation Safeguards
+
+- Inventory must pass the Bash or PowerShell inventory validator, including typed fields and exact resource-count agreement.
+- Grouped Bicep validators require successful restore/build. Environment-specific what-if fails on missing group parameters, failed CLI calls, malformed results, or blocking data-resource deletes.
+- RBAC and OIDC helper scripts require interactive `APPROVE` confirmation. Their PowerShell implementations require PowerShell 7+; `-WhatIf` makes no Azure calls.
+- The project manager and deployer must obtain explicit approval for the specific Azure mutation, including changed targets, repair, fallback, and rollback.
+- **Prompt instructions and script confirmation are not a non-bypassable security boundary.** Enforce host tool permissions and protected deployment environments externally; otherwise have a human execute the proposed commands.
+
+Structural validation does not establish live inventory completeness or application parity. Formal schemas for every artifact, data-changing smoke-test hardening, and real-account integration tests remain separate work.
+
 ---
 
 ## Repository Structure

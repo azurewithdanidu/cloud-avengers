@@ -4,7 +4,7 @@ A phase is not complete until every listed artifact exists, is non-empty, and me
 
 | Phase | Required artifact | Minimum assertion |
 |---|---|---|
-| 1 | `outputs/aws-migration-artifacts/aws-inventory.json` | Valid JSON-like content, not an empty object or empty array |
+| 1 | `outputs/aws-migration-artifacts/aws-inventory.json` | `skills/aws-inventory-scan/scripts/validate-inventory.sh` or `.ps1` exits 0; review live coverage and dependencies separately |
 | 1 | `outputs/aws-migration-artifacts/architecture-diagram.mmd` | Contains `graph` or `flowchart` |
 | 1 | `outputs/aws-migration-artifacts/dependency-matrix.csv` | At least a header row plus one dependency row |
 | 1 | `outputs/aws-migration-artifacts/migration-assessment.md` | Contains at least one `##` heading and migration findings |
@@ -20,3 +20,5 @@ A phase is not complete until every listed artifact exists, is non-empty, and me
 | 3c | `.github/workflows/*.yml` or `.github/workflows/*.yaml` | At least one workflow file exists |
 | 3c | one workflow file with `infra` or `deploy` in the file name | Contains Azure login and deployment steps |
 | 4 | `outputs/validation-report.md` | Starts with `## Status: PASSED` or `## Status: FAILED` |
+
+**Executable Bicep gate:** require exit code 0 from `skills/module-organization/scripts/validate-bicep.sh` or `.ps1` on Phase 3a's Bicep root. Before deployment, run it again with the confirmed environment, location, and subscription. Every group needs a non-empty parameter file; failed CLI calls, malformed what-if responses, and blocking deletes fail validation. If a required validator or runtime is unavailable, block the phase rather than substitute file-existence checks.

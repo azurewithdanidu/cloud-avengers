@@ -19,8 +19,7 @@ After the `main.<group>.bicep` files are written, before any deployment validati
 | Path | Why it matters |
 |---|---|
 | `outputs/azure-architecture-output/design-document.md` | Section 5 lists deployed modules (drives which parameters are needed); Section 7 provides per-environment location and workload name |
-| `outputs/bicep-templates/main.bicep` | Declares the parameter names that .bicepparam files must satisfy |
-| `outputs/bicep-templates/modules/` | Per-module Bicep files confirm parameter types and decorators |
+| `outputs/bicep-templates/main.<group>.bicep` | Each grouped orchestrator declares the parameter names, types, and decorators its .bicepparam files must satisfy |
 ## Process
 
 1. **Enumerate deployed resources per group** — Read `design-document.md` Section 5 (resource list) and the group assignment from the `module-organization` skill. For each resource, look up which parameters it contributes using the **Service Parameter Catalog** below, and note which group file (`networking`/`security`/`data`/`monitoring`/`messaging`/`compute`) it belongs to.
@@ -165,12 +164,13 @@ Repeat the same three files under `parameters/staging/` and `parameters/prod/` w
 | Script | Purpose |
 |---|---|
 | `scripts/validate-bicep.ps1` | Validates all `.bicep` files and runs what-if against each `.bicepparam` environment file |
+| `scripts/validate-bicep.sh` | Bash counterpart; requires jq for what-if result validation |
 
-Run after generating or updating `.bicepparam` files to verify all parameter values resolve correctly:
+Run after generating or updating `.bicepparam` files and require exit code 0. Every group must
+have non-empty parameters; CLI failures, malformed what-if results, and blocking deletes fail.
 
 ```powershell
-./scripts/validate-bicep.ps1 \
-    -ResourceGroup "rg-dev-migration" -Environment dev
+./scripts/validate-bicep.ps1 -Environment dev -Location "<azure-region>" -Subscription "<subscription-id>"
 ```
 
 ---
@@ -205,27 +205,12 @@ Run after generating or updating `.bicepparam` files to verify all parameter val
 
 ## Runtime Detection
 
-This skill supports both Bash and PowerShell. Use the following detection order:
+Run from this skill directory. Use Bash first; otherwise PowerShell 7+. The PowerShell script requires version 7 and does not support Windows PowerShell 5.1.
 
 | Priority | Runtime | Condition | Script |
 |---|---|---|---|
-| 1 (preferred) | Bash | `curl` and `jq` available on PATH | `scripts/<name>.sh` |
-| 2 | PowerShell 7+ | `pwsh` available on PATH | `scripts/<name>.ps1` |
-| 3 (fallback) | Windows PowerShell 5.1 | `powershell.exe` available | `scripts/<name>.ps1 -ExecutionPolicy RemoteSigned` |
+| 1 (preferred) | Bash | Azure CLI and jq | `bash scripts/validate-bicep.sh --environment <env> --location <region> --subscription <id>` |
+| 2 | PowerShell 7+ | `pwsh` and Azure CLI | `pwsh -File scripts/validate-bicep.ps1 -Environment <env> -Location <region> -Subscription <id>` |
 
-**Detection snippet (Bash):**
-```bash
-if command -v curl &>/dev/null && command -v jq &>/dev/null; then
-  bash scripts/<name>.sh [args]
-elif command -v pwsh &>/dev/null; then
-  pwsh -File scripts/<name>.ps1 [args]
-elif command -v powershell.exe &>/dev/null; then
-  powershell.exe -ExecutionPolicy RemoteSigned -File scripts/<name>.ps1 [args]
-else
-  echo "ERROR: Requires curl+jq (Bash) or PowerShell 7+ (pwsh)"
-  exit 1
-fi
-```
-
-**Parameter naming convention:** Bash uses `--kebab-case`; PowerShell uses `-PascalCase`. Both produce identical output.
+If neither runtime is available, stop and report the missing prerequisite.
 

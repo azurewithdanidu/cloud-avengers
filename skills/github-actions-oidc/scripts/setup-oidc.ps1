@@ -59,12 +59,30 @@ $ErrorActionPreference = 'Stop'
 $appName = "gh-$GitHubRepo-$Environment"
 $scope   = "/subscriptions/$Subscription/resourceGroups/$ResourceGroup"
 
+Write-Host "OIDC bootstrap: $GitHubOrg/$GitHubRepo, environment $Environment, scope $scope"
+Write-Host 'Creates an app, service principal, federated credentials, Contributor and User Access Administrator assignments.'
+if ($AdditionalSubjectFilter) {
+    Write-Host "Additional federated subject: $AdditionalSubjectFilter"
+}
+if (-not $PSCmdlet.ShouldProcess($scope, "Bootstrap OIDC for $GitHubOrg/$GitHubRepo ($Environment)")) {
+    return
+}
+if ((Read-Host 'Type APPROVE to bootstrap OIDC; any other response cancels') -cne 'APPROVE') {
+    throw 'OIDC bootstrap cancelled: explicit human confirmation is required.'
+}
+
 Write-Host "`n==> Creating app registration: $appName" -ForegroundColor Cyan
 $appId = az ad app create --display-name $appName --query appId -o tsv
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($appId)) {
+    throw 'App registration creation failed. Stop and review any partial Azure changes before retrying.'
+}
 Write-Host "    App ID (client ID): $appId"
 
 Write-Host "`n==> Creating service principal"
 $spId = az ad sp create --id $appId --query id -o tsv
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($spId)) {
+    throw 'Service principal creation failed. Stop and review any partial Azure changes before retrying.'
+}
 Write-Host "    SP Object ID: $spId"
 
 Write-Host "`n==> Assigning Contributor on $ResourceGroup"
@@ -72,6 +90,7 @@ az role assignment create `
     --assignee $spId `
     --role "Contributor" `
     --scope $scope | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'Contributor assignment failed; OIDC bootstrap is incomplete.' }
 Write-Host "    Done"
 
 Write-Host "`n==> Assigning User Access Administrator on $ResourceGroup"
@@ -80,6 +99,7 @@ az role assignment create `
     --assignee $spId `
     --role "User Access Administrator" `
     --scope $scope | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'User Access Administrator assignment failed; OIDC bootstrap is incomplete.' }
 Write-Host "    Done"
 
 # ── Federated credential — GitHub Environment ─────────────────────────────
@@ -92,6 +112,7 @@ $credBody = @{
 } | ConvertTo-Json
 
 $credBody | az ad app federated-credential create --id $appId --parameters - | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'Federated credential creation failed; OIDC bootstrap is incomplete.' }
 Write-Host "    Created: repo:$GitHubOrg/${GitHubRepo}:environment:$Environment"
 
 # ── Optional: branch push federated credential ────────────────────────────
@@ -105,10 +126,14 @@ if ($AdditionalSubjectFilter) {
     } | ConvertTo-Json
 
     $cred2Body | az ad app federated-credential create --id $appId --parameters - | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Additional federated credential creation failed; OIDC bootstrap is incomplete.' }
     Write-Host "    Created: $AdditionalSubjectFilter"
 }
 
 $tenantId = az account show --query tenantId -o tsv
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tenantId)) {
+    throw 'Tenant lookup failed; OIDC bootstrap summary was not written.'
+}
 
 # ── Output ────────────────────────────────────────────────────────────────────
 $summary = @"
