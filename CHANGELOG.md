@@ -7,6 +7,18 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [1.5.0] - 2026-11-12
+
+### Added
+
+- **`agentz-sync` workflow** (`.github/workflows/agentz-sync.yml`) — publishes each new plugin version to the agentz marketplace as a linked plugin through an automated draft pull request.
+
+### Fixed
+
+- Corrected the slash command shown in `README.md`.
+
+---
+
 ## [1.4.0] - 2026-09-29
 
 ### Added
