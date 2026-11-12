@@ -7,6 +7,28 @@ Versioning: [Semantic Versioning](https://semver.org/)
 
 ---
 
+## [Unreleased]
+
+## [1.6.0] - 2026-11-13
+
+### Added
+
+- MIT license file and explicit supported-workload tiers with MCP prerequisites and recovery guidance.
+- CI structural regression check for script ownership and non-empty Bash/PowerShell pairs; focused dual-platform tests for inventory validation, what-if failures, and mutation confirmation.
+
+### Fixed
+
+- README version now matches plugin version 1.5.0; corrected the remaining Quick Start slash-command typo and canonical plugin homepage/repository URLs.
+- Removed the implicit Sydney region default from the command, project manager, and discovery authentication instructions; require a confirmed primary region while retaining all-enabled-region discovery.
+- Discovery now distinguishes unavailable MCP servers from authentication failures and explicitly blocks incomplete enumeration.
+- Corrected the documented skill-generator filename and grouped Bicep output layout.
+- Removed the empty orphan `skills/iac-transformation/scripts/validate-bicep.sh`; corrected missing Bash script listings, invalid `-ResourceGroup` examples, grouped parameter input paths, and runtime commands in the affected skills.
+- Inventory validators now reject count/array drift, non-integer counts, malformed resources, and non-string identifiers. Repaired the documented inventory example to match the executable contract.
+- Both grouped Bicep validator pairs now fail on missing group parameters, CLI errors, malformed what-if responses, and blocking deletes instead of reporting manual-review success.
+- RBAC and OIDC PowerShell helpers now honor `ShouldProcess`/`-WhatIf`, require explicit confirmation, and stop on Azure CLI failures; Bash helpers reject unattended confirmation. Documented operation-specific approval and the need for externally enforced host permissions.
+
+---
+
 ## [1.5.0] - 2026-11-12
 
 ### Added

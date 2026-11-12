@@ -41,7 +41,7 @@ SUB_ARGS=()
 ERRORS=0
 
 pass() { echo "  [PASS] $1"; }
-fail() { echo "  [FAIL] $1"; ((ERRORS++)); }
+fail() { echo "  [FAIL] $1"; ERRORS=$((ERRORS + 1)); }
 
 # ── Step 1: Restore AVM modules for every group file ──────────────────────────
 echo ""
@@ -82,8 +82,14 @@ if [[ -n "$ENVIRONMENT" ]]; then
     PARAM_FILES+=("$f")
   done < <(find "$PARAMS_DIR" -name "*.bicepparam" -print0 2>/dev/null || true)
 
+  for gf in "${GROUP_FILES[@]}"; do
+    group_name=$(basename "$gf" .bicep)
+    group_name="${group_name#main.}"
+    [[ -s "$PARAMS_DIR/$group_name.bicepparam" ]] || fail "$group_name — missing or empty parameter file in $PARAMS_DIR"
+  done
+
   if [[ "${#PARAM_FILES[@]}" -eq 0 ]]; then
-    echo "  No .bicepparam files found under $PARAMS_DIR — skipping what-if"
+    fail "No .bicepparam files found under $PARAMS_DIR"
   else
     for pf in "${PARAM_FILES[@]}"; do
       group_name=$(basename "$pf" .bicepparam)
@@ -95,27 +101,31 @@ if [[ -n "$ENVIRONMENT" ]]; then
       fi
 
       echo -n "  what-if: $group_name ... "
-      WHATIF_OUT=$(az deployment sub what-if \
+      if ! WHATIF_OUT=$(az deployment sub what-if \
           --location "$LOCATION" \
           --template-file "$group_bicep" \
           --parameters "$pf" \
           --output json \
-          "${SUB_ARGS[@]}" 2>&1 || true)
+          "${SUB_ARGS[@]}"); then
+        fail "what-if failed for $group_name"
+        continue
+      fi
 
-      if echo "$WHATIF_OUT" | jq -e . &>/dev/null; then
+      if echo "$WHATIF_OUT" | jq -e '
+        (.properties.changes | type == "array") and
+        all(.properties.changes[]; (.changeType | type == "string") and (.resourceId | type == "string"))
+      ' >/dev/null; then
         BLOCKING=$(echo "$WHATIF_OUT" | jq -r \
-          '[.properties.changes[]? | select(.changeType=="Delete") | select(.resourceId | test("storageAccounts|vaults|servers|namespaces|databaseAccounts"))] | length' \
-          2>/dev/null || echo 0)
+          '[.properties.changes[]? | select(.changeType=="Delete") | select(.resourceId | test("storageAccounts|vaults|servers|namespaces|databaseAccounts"))] | length')
         if [[ "$BLOCKING" -gt 0 ]]; then
           fail "$group_name — BLOCKING DELETE on data resource(s)"
           echo "$WHATIF_OUT" | jq -r \
-            '.properties.changes[]? | select(.changeType=="Delete") | select(.resourceId | test("storageAccounts|vaults|servers|namespaces|databaseAccounts")) | "    DELETE: \(.resourceId)"' \
-            2>/dev/null || true
+            '.properties.changes[]? | select(.changeType=="Delete") | select(.resourceId | test("storageAccounts|vaults|servers|namespaces|databaseAccounts")) | "    DELETE: \(.resourceId)"'
         else
           pass "$group_name — no blocking changes"
         fi
       else
-        echo "(could not parse JSON — review manually)"
+        fail "$group_name — invalid what-if JSON or missing changes array"
       fi
     done
   fi

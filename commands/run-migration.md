@@ -13,9 +13,11 @@ Before doing anything else, ask the user for the following if they have not alre
 | Input | Description | Default |
 |---|---|---|
 | **AWS Account ID** | 12-digit AWS account number to migrate from | *(required — no default)* |
-| **AWS Region** | Primary AWS region where resources are deployed | `ap-southeast-2` (Sydney) |
+| **AWS Region** | Primary AWS region where resources are deployed | *(required — no default)* |
 
 If the user supplies both values in their message, use them directly without asking. If either is missing, prompt for them before proceeding to Step 2.
+
+Never infer a region from an example or silently choose one. Pass the confirmed primary region as context; Phase 1 must still enumerate all enabled regions.
 
 ---
 

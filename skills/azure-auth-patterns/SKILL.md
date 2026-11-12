@@ -119,17 +119,21 @@ Replace all AWS IAM-based authentication patterns with Azure Managed Identity an
 | Script | Purpose |
 |---|---|
 | `scripts/assign-rbac.ps1` | Idempotent RBAC role assignment with pre-populated built-in role GUIDs |
+| `scripts/assign-rbac.sh` | Bash counterpart with the same role shortcuts and idempotency check |
 
 **Approval gate:** this script calls `az role assignment create` and mutates live Azure RBAC state.
 Confirm the principal ID, scope, and role with the user before running it — do not invoke it as an
-unattended step of code generation or refactoring.
+unattended step of code generation or refactoring. Both scripts require an interactive `APPROVE`
+response before Azure calls; do not supply it on the user's behalf. PowerShell `-WhatIf` returns
+without Azure calls. Host-enforced tool permissions remain necessary to prevent an agent from
+automating consent or invoking Azure directly.
 
 Use to assign any built-in role to a managed identity:
 
 ```powershell
-./scripts/assign-rbac.ps1 \
-    -PrincipalId "<managed-identity-object-id>" \
-    -Scope "/subscriptions/<sub>/resourceGroups/<rg>" \
+./scripts/assign-rbac.ps1 `
+    -PrincipalId "<managed-identity-object-id>" `
+    -Scope "/subscriptions/<sub>/resourceGroups/<rg>" `
     -Role "StorageBlobDataContributor"
 ```
 
@@ -169,26 +173,11 @@ Pre-defined role shortcuts: `StorageBlobDataContributor`, `StorageBlobDataReader
 
 ## Runtime Detection
 
-This skill supports both Bash and PowerShell. Use the following detection order:
+Run from this skill directory. Use Bash first; otherwise PowerShell 7+. The PowerShell script requires version 7 and does not support Windows PowerShell 5.1.
 
 | Priority | Runtime | Condition | Script |
 |---|---|---|---|
-| 1 (preferred) | Bash | `curl` and `jq` available on PATH | `scripts/<name>.sh` |
-| 2 | PowerShell 7+ | `pwsh` available on PATH | `scripts/<name>.ps1` |
-| 3 (fallback) | Windows PowerShell 5.1 | `powershell.exe` available | `scripts/<name>.ps1 -ExecutionPolicy RemoteSigned` |
+| 1 (preferred) | Bash | Bash 4+, Azure CLI, interactive terminal | `bash scripts/assign-rbac.sh --principal-id <id> --scope <scope> --role <role>` |
+| 2 | PowerShell 7+ | `pwsh`, Azure CLI, interactive host | `pwsh -File scripts/assign-rbac.ps1 -PrincipalId <id> -Scope <scope> -Role <role>` |
 
-**Detection snippet (Bash):**
-```bash
-if command -v curl &>/dev/null && command -v jq &>/dev/null; then
-  bash scripts/<name>.sh [args]
-elif command -v pwsh &>/dev/null; then
-  pwsh -File scripts/<name>.ps1 [args]
-elif command -v powershell.exe &>/dev/null; then
-  powershell.exe -ExecutionPolicy RemoteSigned -File scripts/<name>.ps1 [args]
-else
-  echo "ERROR: Requires curl+jq (Bash) or PowerShell 7+ (pwsh)"
-  exit 1
-fi
-```
-
-**Parameter naming convention:** Bash uses `--kebab-case`; PowerShell uses `-PascalCase`. Both produce identical output.
+If neither runtime is available, stop and report the missing prerequisite.

@@ -4,22 +4,24 @@
 
 ```json
 {
-  "account_id": "123456789012",
-  "region": "us-east-1",
+  "aws_account_id": "123456789012",
+  "aws_region": "us-east-1",
   "discovery_timestamp": "2026-01-01T00:00:00Z",
   "summary": {
-    "total_resources": 12,
-    "service_count": 6,
+    "total_resources": 2,
+    "service_count": 2,
     "estimated_complexity": "MEDIUM",
     "estimated_effort_weeks": 4
   },
   "services": {
     "lambda": {
-      "count": 2,
+      "service_type": "AWS::Lambda::Function",
+      "count": 1,
       "resources": [
         {
           "arn": "arn:aws:lambda:us-east-1:123456789012:function:upload-processor",
           "name": "upload-processor",
+          "region": "us-east-1",
           "runtime": "python3.11",
           "memory_mb": 512,
           "timeout_s": 30,
@@ -29,7 +31,7 @@
           "layers": [],
           "triggers": [{"source": "API Gateway", "event": "POST /upload"}],
           "vpc_config": {"subnet_ids": [], "security_group_ids": []},
-          "dependencies": ["S3BucketUploads", "DynamoDBTable"],
+          "dependencies": ["prod-uploads-bucket"],
           "tags": {"Environment": "production", "Application": "file-service"},
           "criticality": "HIGH",
           "monthly_cost_usd": 12.50,
@@ -41,11 +43,13 @@
       ]
     },
     "s3": {
+      "service_type": "AWS::S3::Bucket",
       "count": 1,
       "resources": [
         {
           "arn": "arn:aws:s3:::prod-uploads-bucket",
           "name": "prod-uploads-bucket",
+          "region": "us-east-1",
           "versioning_enabled": true,
           "public_access_blocked": true,
           "lifecycle_policies": [{"id": "move-to-cold", "transition_days": 90, "storage_class": "GLACIER"}],
@@ -56,10 +60,7 @@
           "monthly_cost_usd": 8.00
         }
       ]
-    },
-    "dynamodb": {"count": 1, "resources": []},
-    "apigateway": {"count": 1, "resources": []},
-    "secretsmanager": {"count": 1, "resources": []}
+    }
   },
   "implicit_dependencies": [
     {
@@ -69,6 +70,8 @@
   ]
 }
 ```
+
+**Executable contract:** run `scripts/validate-inventory.sh` or `scripts/validate-inventory.ps1` before handing the inventory downstream. The root and `services` must be objects; top-level `discovery_timestamp`, `aws_account_id`, and `aws_region` must be non-blank strings. Each service requires a non-blank `service_type`, a non-negative integer `count` exactly matching its `resources` array length, and object resources with non-blank string identifiers and `region`. Structural validation does not prove live discovery coverage or functional parity; still perform the validation checklist and dependency review.
 
 **JSON key naming rules:** snake_case for all keys. Lowercase service names (`lambda`, `rds`, `s3`). Boolean fields: `multi_az`, `encryption_enabled`, `versioning_enabled`.
 

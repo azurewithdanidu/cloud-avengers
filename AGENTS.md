@@ -7,8 +7,8 @@ This file is the canonical reference for humans and AI agents working in this re
 ## What This Repo Is
 
 An AI-assisted **AWS to Azure migration factory** built as a publishable plugin for Copilot CLI,
-Claude Code, and VS Code. It provides 10 specialist agents and 22 skills that orchestrate the full
-migration pipeline end-to-end.
+Claude Code, and VS Code. It provides 10 specialist agents and 22 skills focused on Python
+serverless workloads and CloudFormation. See README's Supported Workloads section for limits.
 
 ---
 
@@ -29,7 +29,7 @@ agents/                     ← USER-FACING PRODUCT. All 10 migration agents liv
 ├── azure-deployer.agent.md              ← Phase 3d
 ├── deployment-validation.agent.md       ← Phase 4
 ├── skill-evolution-engine.agent.md      ← Meta: fix/improve skills
-└── skill-generator-agent.md             ← Meta: create new skills
+└── skill-generator-agent.agent.md       ← Meta: create new skills
 
 commands/
 └── run-migration.md        ← Slash command: /run-migration. Entry point for users.

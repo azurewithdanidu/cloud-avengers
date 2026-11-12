@@ -64,8 +64,8 @@ if ! jq -e . "${INVENTORY_PATH}" >/dev/null; then
 fi
 
 echo "==> Checking top-level schema"
-for key in discovery_timestamp aws_account_id aws_region services; do
-  if ! jq -e --arg key "$key" '.[$key] != null and .[$key] != ""' "${INVENTORY_PATH}" >/dev/null; then
+for key in discovery_timestamp aws_account_id aws_region; do
+  if ! jq -e --arg key "$key" '.[$key] | type == "string" and test("\\S")' "${INVENTORY_PATH}" >/dev/null; then
     fail "Missing required top-level key: ${key}"
   fi
 done
@@ -81,11 +81,11 @@ fi
 
 echo "==> Checking service entries"
 for service_name in "${SERVICE_KEYS[@]}"; do
-  if ! jq -e --arg service "$service_name" '.services[$service].service_type | type == "string" and length > 0' "${INVENTORY_PATH}" >/dev/null; then
+  if ! jq -e --arg service "$service_name" '.services[$service].service_type | type == "string" and test("\\S")' "${INVENTORY_PATH}" >/dev/null; then
     fail "Service '${service_name}' is missing required field: service_type"
   fi
 
-  if ! jq -e --arg service "$service_name" '.services[$service].count | type == "number" and . >= 0' "${INVENTORY_PATH}" >/dev/null; then
+  if ! jq -e --arg service "$service_name" '.services[$service].count | type == "number" and . >= 0 and . == floor' "${INVENTORY_PATH}" >/dev/null; then
     fail "Service '${service_name}' is missing a valid numeric count field."
   fi
 
@@ -93,11 +93,18 @@ for service_name in "${SERVICE_KEYS[@]}"; do
     fail "Service '${service_name}' must include a resources array."
   fi
 
+  if ! jq -e --arg service "$service_name" '.services[$service] | .count == (.resources | length)' "${INVENTORY_PATH}" >/dev/null; then
+    fail "Service '${service_name}' count does not match resources array length."
+  fi
+  if ! jq -e --arg service "$service_name" 'all(.services[$service].resources[]; type == "object")' "${INVENTORY_PATH}" >/dev/null; then
+    fail "Service '${service_name}' resources must be JSON objects."
+  fi
+
   name_error=$(jq -r --arg service "$service_name" '
     first(
       .services[$service].resources
       | to_entries[]
-      | select(((.value.name // .value.id // .value.identifier // "") | tostring | length) == 0)
+      | select([.value.name, .value.id, .value.identifier] | any(.[]; type == "string" and test("\\S")) | not)
       | "Service \($service) resource[\(.key)] is missing name or id"
     ) // empty
   ' "${INVENTORY_PATH}")
@@ -109,7 +116,7 @@ for service_name in "${SERVICE_KEYS[@]}"; do
     first(
       .services[$service].resources
       | to_entries[]
-      | select(((.value.arn // .value.resource_arn // .value.resource_id // .value.identifier // .value.url // "") | tostring | length) == 0)
+      | select([.value.arn, .value.resource_arn, .value.resource_id, .value.identifier, .value.url] | any(.[]; type == "string" and test("\\S")) | not)
       | "Service \($service) resource[\(.key)] is missing arn or equivalent identifier"
     ) // empty
   ' "${INVENTORY_PATH}")
@@ -121,7 +128,7 @@ for service_name in "${SERVICE_KEYS[@]}"; do
     first(
       .services[$service].resources
       | to_entries[]
-      | select(((.value.region // "") | tostring | length) == 0)
+      | select(.value.region | (type == "string" and test("\\S")) | not)
       | "Service \($service) resource[\(.key)] is missing region"
     ) // empty
   ' "${INVENTORY_PATH}")

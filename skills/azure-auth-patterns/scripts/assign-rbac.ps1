@@ -78,13 +78,23 @@ Write-Host "    Role        : $Role ($resolvedRole)"
 Write-Host "    Principal   : $PrincipalId"
 Write-Host "    Scope       : $Scope"
 
+if (-not $PSCmdlet.ShouldProcess("$PrincipalId at $Scope", "Assign role $Role ($resolvedRole)")) {
+    return
+}
+if ((Read-Host 'Type APPROVE to assign this role; any other response cancels') -cne 'APPROVE') {
+    throw 'RBAC assignment cancelled: explicit human confirmation is required.'
+}
+
 # Check if assignment already exists
 $existing = az role assignment list `
     --assignee $PrincipalId `
     --role $resolvedRole `
     --scope $Scope `
     @subArgs `
-    --query "[0].id" -o tsv 2>$null
+    --query "[0].id" -o tsv
+if ($LASTEXITCODE -ne 0) {
+    throw 'Failed to check existing RBAC assignments; no assignment was created.'
+}
 
 if ($existing) {
     Write-Host "    Already assigned — skipping (idempotent)" -ForegroundColor Yellow
@@ -96,5 +106,8 @@ az role assignment create `
     --role $resolvedRole `
     --scope $Scope `
     @subArgs | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    throw 'Azure RBAC assignment failed.'
+}
 
 Write-Host "    Done" -ForegroundColor Green

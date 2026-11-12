@@ -7,6 +7,7 @@ Describe "assign-rbac.ps1" {
     BeforeAll {
         $script:ScriptPath = "$PSScriptRoot/../../skills/azure-auth-patterns/scripts/assign-rbac.ps1"
         $script:Content    = Get-Content $script:ScriptPath -Raw -ErrorAction SilentlyContinue
+        function az { throw 'Unexpected Azure call' }
     }
 
     Context "File exists" {
@@ -61,6 +62,38 @@ Describe "assign-rbac.ps1" {
                     { $args[0] -is [System.Management.Automation.Language.ParameterAst] }, $true)
                 $paramNames = $params | ForEach-Object { $_.Name.VariablePath.UserPath }
                 $paramNames | Should -Contain $ParamName
+            }
+
+            Context 'Mutation safeguards' {
+                BeforeEach {
+                    Mock az { throw 'Unexpected Azure call' }
+                    Mock Read-Host { 'DECLINE' }
+                }
+
+                It 'makes no Azure calls or confirmation reads for WhatIf' {
+                    & $script:ScriptPath -PrincipalId principal -Scope scope -Role Reader -WhatIf
+                    Should -Invoke az -Times 0
+                    Should -Invoke Read-Host -Times 0
+                }
+
+                It 'denies mutation without explicit human confirmation' {
+                    { & $script:ScriptPath -PrincipalId principal -Scope scope -Role Reader } | Should -Throw '*confirmation*'
+                    Should -Invoke az -Times 0
+                }
+
+                It 'does not create an assignment when the idempotency lookup fails' {
+                    Mock Read-Host { 'APPROVE' }
+                    Mock az { $global:LASTEXITCODE = 1 }
+                    { & $script:ScriptPath -PrincipalId principal -Scope scope -Role Reader } | Should -Throw '*check existing*'
+                    Should -Invoke az -Times 1 -Exactly
+                }
+
+                It 'creates the assignment after confirmation and a successful empty lookup' {
+                    Mock Read-Host { 'APPROVE' }
+                    Mock az { $global:LASTEXITCODE = 0 }
+                    & $script:ScriptPath -PrincipalId principal -Scope scope -Role Reader
+                    Should -Invoke az -Times 2 -Exactly
+                }
             }
         }
     }

@@ -23,13 +23,14 @@ Requirements:
 3. Update only your Phase 1 row and Phase 1 task list in outputs/migration-task-plan.md.
 4. Generate all four outputs even if one output reveals blockers.
 5. If a blocker prevents a complete discovery, mark Phase 1 as failed and record the blocker in the task plan.
+6. Run skills/aws-inventory-scan/scripts/validate-inventory.sh or its .ps1 counterpart on the generated inventory and require exit code 0 before reporting success.
 ```
 
 **Artifact acceptance checks**
 
 | Path | Minimum assertion |
 |---|---|
-| `outputs/aws-migration-artifacts/aws-inventory.json` | Exists, non-empty, and contains structured JSON content with at least one discovered service or resource record |
+| `outputs/aws-migration-artifacts/aws-inventory.json` | Inventory validator exits 0 (typed fields, resource objects, and exact count/array agreement); also review live coverage and dependencies |
 | `outputs/aws-migration-artifacts/architecture-diagram.mmd` | Exists, non-empty, and contains `graph` or `flowchart` |
 | `outputs/aws-migration-artifacts/dependency-matrix.csv` | Exists, non-empty, and contains at least two lines (header + one data row) |
 | `outputs/aws-migration-artifacts/migration-assessment.md` | Exists, non-empty, and contains at least one `##` heading plus findings or recommendations |

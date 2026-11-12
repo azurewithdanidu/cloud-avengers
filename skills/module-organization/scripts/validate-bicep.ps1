@@ -93,8 +93,16 @@ if ($Environment) {
     $paramsDir = Join-Path $BicepRoot "parameters/$Environment"
     $paramFiles = Get-ChildItem -Path $paramsDir -Filter '*.bicepparam' -ErrorAction SilentlyContinue
 
+    foreach ($gf in $groupFiles) {
+        $group = $gf.BaseName.Substring(5)
+        $paramPath = Join-Path $paramsDir "$group.bicepparam"
+        if (-not (Test-Path $paramPath -PathType Leaf) -or (Get-Item $paramPath).Length -eq 0) {
+            Write-Fail "$group — missing or empty parameter file in $paramsDir"
+        }
+    }
+
     if (-not $paramFiles) {
-        Write-Host "  No .bicepparam files found under $paramsDir — skipping what-if" -ForegroundColor Yellow
+        Write-Fail "No .bicepparam files found under $paramsDir"
     } else {
         Write-Step "Running subscription-scope what-if for each group in '$Environment'"
 
@@ -126,6 +134,17 @@ if ($Environment) {
             # Check for blocking conditions
             try {
                 $wi = $whatifJson | ConvertFrom-Json
+                if ($wi.properties.changes -isnot [System.Array]) {
+                    Write-Fail "$group — what-if response must include a changes array"
+                    continue
+                }
+                $invalidChanges = @($wi.properties.changes | Where-Object {
+                    $_.changeType -isnot [string] -or $_.resourceId -isnot [string]
+                })
+                if ($invalidChanges.Count -gt 0) {
+                    Write-Fail "$group — malformed what-if change entries"
+                    continue
+                }
                 $blocking = $wi.properties.changes | Where-Object {
                     $_.changeType -eq 'Delete' -and
                     $_.resourceId -match 'storageAccounts|vaults|servers|namespaces|databaseAccounts'
@@ -137,7 +156,7 @@ if ($Environment) {
                     Write-Pass "$group — no blocking changes"
                 }
             } catch {
-                Write-Host " (could not parse JSON — review manually)" -ForegroundColor Yellow
+                Write-Fail "$group — invalid what-if JSON: $($_.Exception.Message)"
             }
         }
     }
